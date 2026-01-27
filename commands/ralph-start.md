@@ -113,9 +113,18 @@ Task tool parameters:
     2. Ensure ALL acceptance criteria are met
     3. Only modify the files listed (or closely related files if necessary)
     4. Run relevant tests if applicable
-    5. Report what was done and any issues encountered
 
-    When complete, confirm each acceptance criterion was met.
+    OUTPUT REQUIREMENTS - CRITICAL:
+    - Do NOT output lengthy explanations or implementation details
+    - Do NOT use phrases like "Let me think..." or "I'm going to..."
+    - Focus your response on RESULTS, not process
+    - Return a brief, structured result confirming what was done
+
+    When complete, return ONLY:
+    1. Status: success or failure
+    2. Brief summary (1-2 sentences max)
+    3. List of files modified
+    4. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
 ```
 
 ---
@@ -214,11 +223,41 @@ For `in_progress` tasks:
 
 ## Progress Display
 
-Show brief status updates as tasks execute:
+**CRITICAL: Keep output minimal and informative. No lengthy explanations or "let me think" verbosity.**
+
+### Output Format Requirements
+
+When executing, show ONLY brief status updates. Do NOT stream:
+- Implementation details
+- Code being written
+- File contents
+- Subagent reasoning
+- "Let me think about..." or similar phrases
+
+### Required Messages
+
+**When starting a task:**
+```
+→ Starting: [task-id] - [task title]
+```
+
+**When a task completes successfully:**
+```
+✓ Completed: [task-id] - [task title]
+```
+
+**When a task fails:**
+```
+✗ Failed: [task-id] - [task title]
+  Error: [brief one-line error summary]
+```
+
+### Example Execution Output
 
 ```
 Starting execution...
 Phase: executing
+Tasks: 5 total, 0 completed
 
 Group 1:
   → Starting: task-001 - Create user model
@@ -230,10 +269,83 @@ Group 2:
   → Starting: task-003 - Create user controller
   ✓ Completed: task-003 - Create user controller
 
+Group 3:
+  → Starting: task-004 - Add validation logic
+  → Starting: task-005 - Create API endpoint
+  ✗ Failed: task-004 - Add validation logic
+    Error: Type mismatch in validation function
+
+✗ EXECUTION STOPPED - Task Failed
 ...
 ```
 
-Keep output minimal - no lengthy explanations.
+### Verbosity Rules
+
+| DO show | Do NOT show |
+|---------|-------------|
+| Task ID and title | Implementation code |
+| Brief completion status | Subagent reasoning |
+| One-line error summary | Full stack traces (put in logs) |
+| Group progress | "I'm going to..." preambles |
+| Final summary | "Let me think..." explanations |
+
+---
+
+## Results Storage
+
+**Detailed task results go to .ralph/results/, NOT to the console output.**
+
+### Why Store Results Separately?
+
+1. **Keeps console clean** - Users see progress, not implementation noise
+2. **Provides detailed logs** - Full execution details available for debugging
+3. **Enables review** - Users can examine what each task actually did
+4. **Supports resumption** - Helps determine if interrupted tasks completed
+
+### Result File Format
+
+For each completed task, save to `.ralph/results/task-NNN.md`:
+
+```markdown
+# Task Result: [task-id]
+
+## Task: [task title]
+
+## Status: completed | failed
+
+## Timestamp: [ISO 8601]
+
+## Changes Made
+- [file1.ext]: [brief description of change]
+- [file2.ext]: [brief description of change]
+
+## Acceptance Criteria Results
+- [x] Criterion 1 - Met because...
+- [x] Criterion 2 - Met because...
+- [ ] Criterion 3 - NOT MET: [reason]
+
+## Notes
+[Any additional context, warnings, or observations]
+```
+
+### What Goes Where
+
+| Information | Where it goes |
+|-------------|---------------|
+| "Starting task X" | Console (brief) |
+| Code changes made | .ralph/results/ |
+| File diffs | .ralph/results/ |
+| Test output | .ralph/results/ |
+| Error stack traces | .ralph/logs/errors.log |
+| Completion message | Console (brief) |
+| Criteria verification | .ralph/results/ |
+
+### Subagent Instructions for Results
+
+When spawning subagents, instruct them to:
+1. **Do NOT** print lengthy implementation details to the user
+2. **DO** return a structured result that will be saved to results/
+3. Focus output on confirmation that acceptance criteria were met
 
 ---
 
