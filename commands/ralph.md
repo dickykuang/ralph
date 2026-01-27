@@ -625,3 +625,275 @@ If the research subagent fails or returns invalid JSON:
 - Results inform the decisions phase (what needs user input)
 - For security-sensitive tasks, research is especially valuable
 - Research is cached; re-running /ralph on same task reuses existing research
+
+---
+
+## Decision Surfacing Phase
+
+After research (or immediately after complexity assessment for simple tasks), Ralph surfaces important decisions that require user input before planning can proceed. This ensures the plan is aligned with user preferences and resolves ambiguities early.
+
+### When Decisions Run
+
+The decisions phase runs for all tasks, but its scope varies:
+
+| Task Type | Decision Scope |
+|-----------|----------------|
+| **Simple** | Minimal or no decisions needed; may skip directly to planning |
+| **Complex** | Surfaces decisions identified during research |
+
+```
+Research complete (or skipped for simple tasks)
+    ↓
+[decisions] phase begins
+    ↓
+Analyze research findings for decision points
+    ↓
+Present each decision to user
+    ↓
+User answers (or asks follow-up questions)
+    ↓
+Save decisions to .ralph/decisions.json
+    ↓
+State updated to [planning] phase
+```
+
+### Decision Categories
+
+Decisions are surfaced in these categories, ordered by impact:
+
+| Category | Description | Examples |
+|----------|-------------|----------|
+| **Architecture** | Fundamental design choices | Monolith vs microservices, REST vs GraphQL |
+| **Technology** | Library/framework selections | Which OAuth library, which database |
+| **Security** | Security-related choices | Token storage, encryption approach |
+| **Integration** | External service decisions | Which provider, API version |
+| **Behavior** | Feature behavior specifications | Error handling, edge cases |
+
+### Identifying Decisions from Research
+
+Analyze research findings to extract decisions:
+
+1. **From Specs**: Multiple valid approaches mentioned → decision needed
+2. **From Best Practices**: Conflicting recommendations → decision needed
+3. **From Pitfalls**: Risk mitigation options → decision needed
+4. **From Context**: Missing requirements → clarification needed
+
+**Example decision extraction:**
+
+```
+Research finding: "OAuth tokens can be stored in httpOnly cookies or server-side sessions"
+    ↓
+Decision identified: Token storage approach
+    ↓
+Options: (1) httpOnly cookies, (2) Server-side sessions
+```
+
+### Presenting Decisions to the User
+
+Each decision is presented with:
+
+1. **Context**: What the decision is about and relevant background
+2. **Why It Matters**: Impact on the project (security, performance, maintainability)
+3. **Options**: Numbered list with brief description of each option
+4. **Recommendation** (if applicable): Which option is recommended and why
+
+**Format for presenting a decision:**
+
+```
+### Decision [N]: [Decision Title]
+
+**Context:**
+[Brief explanation of what needs to be decided and relevant background from research]
+
+**Why This Matters:**
+[Explain the impact - security implications, performance, maintainability, etc.]
+
+**Options:**
+1. [Option A] - [Brief description]
+2. [Option B] - [Brief description]
+3. [Option C] - [Brief description] (if applicable)
+
+**Recommendation:** [Option X] because [rationale]
+
+---
+Which option do you prefer? (Enter 1, 2, 3, or ask a question)
+```
+
+### User Interaction Flow
+
+The user can respond in several ways:
+
+| Response | Action |
+|----------|--------|
+| Number (1, 2, 3...) | Record the selected option |
+| Question | Answer the question, then re-present options |
+| "skip" | Mark decision as deferred (will use default/recommendation) |
+| Custom answer | Record the custom preference |
+
+**Important:** Planning does NOT proceed until all critical decisions are resolved. The user must provide an answer for each decision before moving to the planning phase.
+
+### Output Format: decisions.json
+
+User decisions are saved to `.ralph/decisions.json`:
+
+```json
+{
+  "task": "implement OAuth2 login with Google provider",
+  "decided_at": "2026-01-27T12:45:00Z",
+  "decisions": [
+    {
+      "id": "D1",
+      "title": "Token Storage Approach",
+      "category": "security",
+      "context": "OAuth tokens need secure storage to prevent theft",
+      "options": [
+        {"number": 1, "label": "httpOnly cookies", "description": "Stored by browser, sent automatically"},
+        {"number": 2, "label": "Server-side sessions", "description": "Stored on server, session ID in cookie"}
+      ],
+      "recommendation": 2,
+      "recommendation_rationale": "More secure against XSS, easier to revoke",
+      "selected_option": 2,
+      "user_response": "2",
+      "follow_up_questions": []
+    },
+    {
+      "id": "D2",
+      "title": "Session Library",
+      "category": "technology",
+      "context": "Need to choose a session management library",
+      "options": [
+        {"number": 1, "label": "express-session", "description": "Popular, well-documented"},
+        {"number": 2, "label": "cookie-session", "description": "Simpler, stateless"},
+        {"number": 3, "label": "Custom implementation", "description": "Full control, more work"}
+      ],
+      "recommendation": 1,
+      "recommendation_rationale": "Most widely used, excellent Redis support",
+      "selected_option": 1,
+      "user_response": "1",
+      "follow_up_questions": [
+        {
+          "question": "Does express-session support clustering?",
+          "answer": "Yes, with a Redis store it works across multiple instances"
+        }
+      ]
+    }
+  ],
+  "deferred": [],
+  "critical_resolved": true
+}
+```
+
+### Schema Definitions
+
+#### Decision Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier (D1, D2, etc.) |
+| `title` | string | Brief title of the decision |
+| `category` | string | Category (architecture, technology, security, integration, behavior) |
+| `context` | string | Background information about the decision |
+| `options` | array | List of Option objects |
+| `recommendation` | number\|null | Recommended option number (if any) |
+| `recommendation_rationale` | string | Why this option is recommended |
+| `selected_option` | number | The option number the user selected |
+| `user_response` | string | Raw user response (number or custom text) |
+| `follow_up_questions` | array | Q&A exchanges before final decision |
+
+#### Option Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `number` | number | Option number (1, 2, 3...) |
+| `label` | string | Short name for the option |
+| `description` | string | Brief explanation of what this option means |
+
+#### Follow-up Question Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `question` | string | User's follow-up question |
+| `answer` | string | Agent's answer to the question |
+
+### Marking Decisions as Critical
+
+Some decisions are critical (must be resolved before planning):
+
+- **Architecture decisions**: Always critical
+- **Security decisions**: Always critical
+- **Technology decisions**: Critical if affects core functionality
+- **Integration decisions**: Critical if blocks implementation
+- **Behavior decisions**: Usually non-critical (can be deferred)
+
+The `critical_resolved` field in decisions.json tracks whether all critical decisions have been answered.
+
+### Implementation Instructions
+
+When implementing the `/ralph` command decision phase:
+
+1. **Update state**: Set phase to `decisions`
+2. **Load research**: Read `.ralph/research.json` (if exists)
+3. **Extract decisions**: Analyze research for decision points
+4. **For each decision**:
+   a. Present using the format above
+   b. Wait for user response
+   c. If question: answer it, then re-present options
+   d. Record the decision
+5. **Save decisions**: Write to `.ralph/decisions.json`
+6. **Verify critical**: Ensure all critical decisions resolved
+7. **Update state**: Transition phase to `planning`
+
+**Example flow:**
+
+```
+# After research phase (or complexity assessment for simple tasks)...
+
+1. Update state.json:
+   - phase: "decisions"
+   - updated_at: <current timestamp>
+
+2. Analyze research findings:
+   - Extract decision points from specs, best practices, pitfalls
+   - Identify categories and criticality
+
+3. For each decision:
+   - Format and present to user
+   - Use AskUserQuestion tool or direct prompting
+   - Handle follow-up questions
+   - Record response
+
+4. Save to .ralph/decisions.json
+
+5. Verify critical_resolved == true
+
+6. Update state.json:
+   - phase: "planning"
+   - updated_at: <current timestamp>
+```
+
+### Handling No Decisions Needed
+
+For simple tasks or tasks where research surfaced no ambiguities:
+
+1. Create minimal decisions.json:
+```json
+{
+  "task": "fix typo in README",
+  "decided_at": "2026-01-27T12:45:00Z",
+  "decisions": [],
+  "deferred": [],
+  "critical_resolved": true
+}
+```
+
+2. Inform user: "No decisions needed. Proceeding to planning..."
+3. Transition directly to planning phase
+
+### Notes
+
+- Users can always ask clarifying questions before deciding
+- Default to recommendations if user says "skip" on non-critical decisions
+- Critical decisions cannot be skipped - user must choose
+- Decisions are cached; re-running /ralph preserves previous decisions
+- User can re-run /ralph with `--reset-decisions` to clear and re-decide
+- The planning phase uses decisions.json to inform task generation
