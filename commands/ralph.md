@@ -232,3 +232,163 @@ The agent should read the current state, modify the necessary fields, and write 
 - The `task_order` array determines execution sequence and parallel grouping
 - Tasks with no dependencies can run in parallel (handled by /ralph-start)
 - On failure, execution halts immediately and `phase` becomes `failed`
+
+---
+
+## Complexity Assessment
+
+Ralph assesses task complexity to determine the appropriate workflow. Simple tasks skip research and proceed directly to planning, while complex tasks get full research treatment.
+
+### Complexity Levels
+
+| Level | Description | Workflow |
+|-------|-------------|----------|
+| `simple` | Straightforward, well-defined tasks | Skip research → Planning → Execution |
+| `complex` | Multi-faceted tasks requiring research | Research → Decisions → Planning → Execution |
+
+### Simple Task Criteria
+
+A task is considered **simple** if it meets ALL of these conditions:
+
+1. **Single File Scope**: Affects only one file or a small, well-defined set of files
+2. **Clear Implementation**: No ambiguity about how to accomplish it
+3. **Familiar Technology**: Uses existing patterns/tech already in the codebase
+4. **Low Risk**: Unlikely to introduce bugs or break existing functionality
+5. **No External Research Needed**: Standard coding task with known solution
+
+#### Examples of Simple Tasks
+
+- Fixing a typo in documentation or code
+- Renaming a variable or function
+- Adding a simple utility function with clear requirements
+- Updating a configuration value
+- Adding basic input validation to an existing form
+- Writing a straightforward unit test for existing code
+- Adding a new field to an existing data structure
+- Fixing a lint warning or formatting issue
+
+### Complex Task Criteria
+
+A task is considered **complex** if it meets ANY of these conditions:
+
+1. **Multi-File Changes**: Affects multiple files across different parts of the codebase
+2. **New Feature**: Introduces new functionality that doesn't exist yet
+3. **Unfamiliar Technology**: Requires using libraries, APIs, or patterns not already in the project
+4. **Integration Work**: Connects multiple systems, services, or external APIs
+5. **Architectural Decisions**: Requires choosing between different approaches
+6. **Security Implications**: Touches authentication, authorization, or sensitive data
+7. **Performance Critical**: Needs optimization or handles high-volume operations
+8. **Ambiguous Requirements**: Multiple valid interpretations of what's needed
+
+#### Examples of Complex Tasks
+
+- Building a new REST API endpoint with database integration
+- Implementing user authentication/authorization
+- Adding a new third-party service integration
+- Refactoring a module for better performance
+- Implementing real-time features (WebSockets, SSE)
+- Adding a new major feature to the application
+- Database schema migrations
+- Setting up CI/CD pipelines
+- Implementing caching strategies
+
+### Assessment Algorithm
+
+```
+function assessComplexity(task_description, codebase_context):
+    # Check for complexity indicators in the task
+    complexity_signals = 0
+
+    # Signal 1: Multi-file indicators
+    if mentions_multiple_files(task_description) OR
+       mentions_system_wide_change(task_description):
+        complexity_signals += 1
+
+    # Signal 2: New feature indicators
+    if contains_words(["new", "create", "build", "implement", "add feature"]):
+        complexity_signals += 1
+
+    # Signal 3: Integration indicators
+    if contains_words(["integrate", "connect", "API", "third-party", "external"]):
+        complexity_signals += 1
+
+    # Signal 4: Technology indicators
+    if mentions_unfamiliar_tech(task_description, codebase_context):
+        complexity_signals += 1
+
+    # Signal 5: Architectural indicators
+    if contains_words(["architecture", "refactor", "redesign", "migrate"]):
+        complexity_signals += 1
+
+    # Signal 6: Security indicators
+    if contains_words(["auth", "security", "permission", "encrypt", "token"]):
+        complexity_signals += 1
+
+    # Threshold: 2 or more signals = complex
+    if complexity_signals >= 2:
+        return "complex"
+    else:
+        return "simple"
+```
+
+### Decision Matrix
+
+| Task Characteristic | Simple | Complex |
+|---------------------|--------|---------|
+| Files affected | 1-2 | 3+ |
+| New dependencies | No | Yes |
+| External APIs | No | Yes |
+| Database changes | No/minor | Schema changes |
+| Security impact | None | Any |
+| Research needed | No | Yes |
+| User decisions needed | 0-1 | 2+ |
+
+### Workflow Implications
+
+#### For Simple Tasks
+
+```
+User invokes /ralph "fix typo in README"
+    ↓
+Assess complexity → Simple
+    ↓
+Skip research phase
+    ↓
+Skip decisions phase (or minimal)
+    ↓
+Generate lightweight plan
+    ↓
+[planning_complete]
+```
+
+#### For Complex Tasks
+
+```
+User invokes /ralph "implement OAuth2 login"
+    ↓
+Assess complexity → Complex
+    ↓
+Research phase (specs, best practices, pitfalls)
+    ↓
+Decisions phase (which OAuth provider? session vs JWT?)
+    ↓
+Comprehensive planning with detailed tasks
+    ↓
+[planning_complete]
+```
+
+### Usage in /ralph Command
+
+When implementing the /ralph command, assess complexity early:
+
+1. Parse the user's task description
+2. Run complexity assessment
+3. Store result in state.json as `complexity` field
+4. Branch workflow based on complexity level
+
+### Notes
+
+- When in doubt, classify as complex (research is valuable)
+- User can override complexity assessment if they disagree
+- Simple tasks still generate plans, just with less overhead
+- Complexity is assessed once at the start, not re-evaluated mid-workflow
