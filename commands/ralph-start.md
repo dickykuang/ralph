@@ -48,20 +48,26 @@ For each parallel_group (1, 2, 3, ...):
 
     4. Wait for ALL spawned tasks to complete
 
-    5. For each completed task:
-       - Update task status to "completed" in state.json
-       - Save result to .ralph/results/task-NNN.md
-       - Show: "✓ Completed: [task-id] - [title]"
+    5. Check results - process ALL returned tasks:
 
-    6. If ANY task fails:
-       - Update task status to "failed" in state.json
-       - Log error to .ralph/logs/errors.log
-       - Set phase to "failed" in state.json
-       - STOP ALL EXECUTION IMMEDIATELY
-       - Report failure details and exit
+       For each completed task:
+         - Update task status to "completed" in state.json
+         - Save result to .ralph/results/task-NNN.md
+         - Show: "✓ Completed: [task-id] - [title]"
 
-    7. Move to next parallel_group
+       If ANY task failed:
+         - FAIL-FAST: Stop processing immediately
+         - Update failed task status to "failed" in state.json
+         - Log error to .ralph/logs/errors.log (see Error Handling)
+         - Set phase to "failed" in state.json
+         - Set last_failure object in state.json
+         - Report failure with task ID, error, and log file path
+         - EXIT - do NOT continue to next group or task
+
+    6. Only if ALL tasks in group succeeded, move to next parallel_group
 ```
+
+**IMPORTANT**: If parallel tasks are running and one fails, you must still wait for all spawned tasks to return (they're already running). Process their results, but do NOT spawn any new tasks after detecting a failure.
 
 ### Step 4: Completion
 
@@ -231,30 +237,94 @@ Keep output minimal - no lengthy explanations.
 
 ---
 
+## Fail-Fast Behavior
+
+**CRITICAL: On ANY task failure, ALL execution stops immediately.**
+
+This is non-negotiable. Do not:
+- Continue to next task
+- Continue to next parallel group
+- Attempt to "recover" or "work around" the failure
+- Queue up remaining tasks
+
+### Why Fail-Fast?
+
+1. Dependent tasks will likely fail anyway
+2. User needs to review and fix the issue
+3. Continuing wastes resources on doomed work
+4. State consistency is easier to maintain
+
+### Failure Detection
+
+A task is considered "failed" if:
+- The subagent explicitly reports failure
+- The subagent throws an error
+- The subagent reports acceptance criteria not met
+- The Task tool returns an error
+
+---
+
 ## Error Handling
 
 ### Task Failure
 
 If a subagent reports failure or throws an error:
 
-1. **Mark task as failed** in state.json
-2. **Log details** to .ralph/logs/errors.log:
+1. **STOP immediately** - do not spawn any more tasks
+2. **Mark task as failed** in state.json
+3. **Create logs directory** if it doesn't exist: `.ralph/logs/`
+4. **Log details** to `.ralph/logs/errors.log`:
    ```
-   [timestamp] TASK FAILED: [task-id]
-   Title: [task title]
-   Error: [error message]
-   ---
-   [full error details]
+   ================================================================================
+   TASK FAILED
+   ================================================================================
+   Timestamp: [ISO 8601 timestamp]
+   Task ID: [task-id]
+   Task Title: [task title]
+
+   Error Summary:
+   [brief error message - first line or summary]
+
+   Full Error Details:
+   [complete error message from subagent]
+
+   Files Involved:
+   [list of files_to_modify from task]
+
+   Acceptance Criteria (what was expected):
+   [list all acceptance criteria from task]
+   ================================================================================
    ```
-3. **Update state.json** with last_failure object
-4. **STOP immediately** - do not continue to next task or group
-5. **Report to user**:
+5. **Update state.json** with last_failure object:
+   ```json
+   {
+     "phase": "failed",
+     "task_statuses": {
+       "[failed-task-id]": "failed"
+     },
+     "last_failure": {
+       "task_id": "[task-id]",
+       "task_title": "[task title]",
+       "error_message": "[brief error summary]",
+       "failed_at": "[ISO 8601 timestamp]",
+       "log_file": ".ralph/logs/errors.log"
+     },
+     "updated_at": "[timestamp]"
+   }
    ```
-   ✗ Task failed: [task-id] - [title]
+6. **Report to user** with this exact format:
+   ```
+   ✗ EXECUTION STOPPED - Task Failed
+
+   Task: [task-id] - [task title]
    Error: [brief error message]
 
-   See .ralph/logs/errors.log for details.
-   Fix the issue and run /ralph-start to resume.
+   Details logged to: .ralph/logs/errors.log
+
+   To resume after fixing:
+   1. Review the error in .ralph/logs/errors.log
+   2. Fix the issue in your code
+   3. Run /ralph-start to continue from failed task
    ```
 
 ### Missing State
