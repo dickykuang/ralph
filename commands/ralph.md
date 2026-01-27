@@ -897,3 +897,365 @@ For simple tasks or tasks where research surfaced no ambiguities:
 - Decisions are cached; re-running /ralph preserves previous decisions
 - User can re-run /ralph with `--reset-decisions` to clear and re-decide
 - The planning phase uses decisions.json to inform task generation
+
+---
+
+## Planning Phase
+
+After decisions are resolved, Ralph generates a comprehensive plan with discrete, executable tasks. This phase produces a PRD document and individual task files that enable autonomous execution via subagents.
+
+### When Planning Runs
+
+Planning runs after all critical decisions are resolved:
+
+```
+Decisions phase complete (critical_resolved: true)
+    ↓
+[planning] phase begins
+    ↓
+Generate PRD document (.ralph/prd.md)
+    ↓
+Create discrete task files (.ralph/tasks/)
+    ↓
+Identify parallel execution groups
+    ↓
+State updated to [planning_complete]
+    ↓
+User reviews plan, runs /clear, then /ralph-start
+```
+
+### Planning Outputs
+
+| Output | Location | Purpose |
+|--------|----------|---------|
+| PRD Document | `.ralph/prd.md` | Human-readable plan overview |
+| Task Files | `.ralph/tasks/task-NNN.json` | Machine-readable task specifications |
+| State Update | `.ralph/state.json` | task_order, task_statuses populated |
+
+### PRD Document Generation
+
+The PRD (Product Requirements Document) provides a human-readable overview of the plan. It is saved to `.ralph/prd.md`.
+
+#### PRD Structure
+
+```markdown
+# [Task Title]
+
+## Overview
+[Brief summary of what will be implemented]
+
+## Original Request
+[User's original task description]
+
+## Research Summary
+[Key findings from research phase, if applicable]
+
+## Decisions Made
+[Summary of user decisions that inform the plan]
+
+## Implementation Plan
+
+### Phase 1: [Phase Name]
+- Task 1: [Brief description]
+- Task 2: [Brief description]
+
+### Phase 2: [Phase Name]
+- Task 3: [Brief description]
+- Task 4: [Brief description]
+
+## Task Dependency Graph
+[Visual representation of task dependencies]
+
+## Files to be Modified
+[List of files that will be created or modified]
+
+## Acceptance Criteria
+[Overall success criteria for the complete implementation]
+
+## Notes
+[Any additional context or considerations]
+```
+
+#### PRD Generation Instructions
+
+When generating the PRD:
+
+1. **Title**: Derive from original request, make it descriptive
+2. **Overview**: 2-3 sentences summarizing the implementation approach
+3. **Research Summary**: Extract key insights from research.json (skip if simple task)
+4. **Decisions Made**: List each decision from decisions.json with selected option
+5. **Implementation Plan**: Group related tasks into logical phases
+6. **Dependency Graph**: ASCII diagram showing task dependencies
+7. **Files to Modify**: Aggregate from all task files_to_modify lists
+8. **Acceptance Criteria**: High-level criteria derived from user's request
+
+### Task File Structure
+
+Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files are named `task-NNN.json` where NNN is a zero-padded sequence number.
+
+#### Task Schema
+
+```json
+{
+  "id": "task-001",
+  "title": "Create user model and migration",
+  "description": "Define the User schema with fields for authentication and create the corresponding database migration.",
+  "acceptance_criteria": [
+    "User model exists with email, password_hash, and timestamps",
+    "Migration file creates users table with correct columns",
+    "Migration runs successfully without errors"
+  ],
+  "dependencies": [],
+  "parallel_group": 1,
+  "files_to_modify": [
+    "lib/myapp/accounts/user.ex",
+    "priv/repo/migrations/*_create_users.exs"
+  ],
+  "context": {
+    "research_refs": ["spec-1", "bp-2"],
+    "decisions_refs": ["D1"],
+    "notes": "Use Argon2 for password hashing per security decision"
+  },
+  "status": "pending",
+  "estimated_complexity": "medium"
+}
+```
+
+#### Field Definitions
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | string | Yes | Unique identifier (task-001, task-002, etc.) |
+| `title` | string | Yes | Brief, descriptive title (5-10 words) |
+| `description` | string | Yes | Detailed description of what to implement |
+| `acceptance_criteria` | array | Yes | List of specific, verifiable criteria |
+| `dependencies` | array | Yes | List of task IDs that must complete first |
+| `parallel_group` | number | Yes | Group number for parallel execution (1, 2, 3...) |
+| `files_to_modify` | array | Yes | Files to create or modify (glob patterns allowed) |
+| `context` | object | No | Additional context from research/decisions |
+| `status` | string | Yes | Current status (pending, in_progress, completed, failed) |
+| `estimated_complexity` | string | No | low, medium, or high |
+
+#### Acceptance Criteria Guidelines
+
+Each criterion should be:
+
+- **Specific**: Clear about what's expected
+- **Verifiable**: Can be checked objectively
+- **Independent**: Can be verified without other criteria
+- **Atomic**: Tests one thing, not multiple
+
+**Good examples:**
+- "Function returns empty array when no matches found"
+- "API endpoint returns 401 for unauthenticated requests"
+- "Migration rollback removes the table successfully"
+
+**Bad examples:**
+- "Code is well-written" (subjective)
+- "Feature works correctly" (vague)
+- "All tests pass and code is formatted" (multiple criteria)
+
+### Task Dependencies
+
+Dependencies define the execution order. A task cannot start until all its dependencies have completed.
+
+#### Dependency Rules
+
+1. **No circular dependencies**: A → B → C → A is invalid
+2. **Explicit declaration**: Every dependency must be explicitly listed
+3. **Transitive independence**: If A depends on B, and B depends on C, A does NOT need to list C
+
+#### Example Dependency Graph
+
+```
+task-001 (User model)
+    ↓
+task-002 (User controller) ←── task-003 (Auth service)
+    ↓                              ↓
+task-004 (User routes) ←───────────┘
+    ↓
+task-005 (Integration tests)
+```
+
+**Corresponding task files:**
+
+```json
+// task-001.json
+{"id": "task-001", "dependencies": [], "parallel_group": 1}
+
+// task-002.json
+{"id": "task-002", "dependencies": ["task-001"], "parallel_group": 2}
+
+// task-003.json
+{"id": "task-003", "dependencies": ["task-001"], "parallel_group": 2}
+
+// task-004.json
+{"id": "task-004", "dependencies": ["task-002", "task-003"], "parallel_group": 3}
+
+// task-005.json
+{"id": "task-005", "dependencies": ["task-004"], "parallel_group": 4}
+```
+
+### Parallel Execution Groups
+
+Tasks with the same `parallel_group` number and satisfied dependencies can execute simultaneously. This enables efficient use of subagents.
+
+#### Parallel Group Assignment Rules
+
+1. **Group 1**: Tasks with no dependencies
+2. **Group 2**: Tasks that depend only on Group 1 tasks
+3. **Group N**: Tasks that depend only on tasks in groups < N
+4. **Same group = parallel**: Tasks in the same group run together
+
+#### Identifying Parallelizable Tasks
+
+Tasks can run in parallel if:
+- They have the same `parallel_group` number
+- All their dependencies are complete
+- They don't modify the same files
+
+**Example parallel execution:**
+
+```
+Group 1 (parallel):
+  └── task-001: Create User model
+  └── task-006: Create Product model
+
+Group 2 (parallel, after Group 1):
+  └── task-002: Create User controller
+  └── task-003: Create Auth service
+  └── task-007: Create Product controller
+
+Group 3 (sequential from Group 2):
+  └── task-004: Create User routes
+
+Group 4 (after Group 3):
+  └── task-005: Integration tests
+```
+
+### Task Sizing Guidelines
+
+Each task should be sized for completion in a single subagent session. This ensures:
+- Fresh context for each task (after /clear)
+- Manageable scope
+- Clear success/failure determination
+
+#### Size Indicators
+
+| Size | Indicators | Task Count |
+|------|------------|------------|
+| **Small** | Single function, < 50 lines | Can combine 2-3 |
+| **Medium** | Single module, 50-200 lines | One per task |
+| **Large** | Multiple modules, > 200 lines | Split into subtasks |
+
+#### Splitting Large Tasks
+
+If a task would be too large:
+
+1. Identify logical boundaries (model vs controller vs routes)
+2. Create separate tasks with dependencies
+3. Each subtask should be independently verifiable
+
+**Before (too large):**
+```json
+{
+  "id": "task-001",
+  "title": "Implement complete user authentication",
+  "description": "Create user model, controller, routes, and tests..."
+}
+```
+
+**After (properly sized):**
+```json
+// task-001.json
+{"id": "task-001", "title": "Create user model with password hashing"}
+
+// task-002.json
+{"id": "task-002", "title": "Create user controller with CRUD actions", "dependencies": ["task-001"]}
+
+// task-003.json
+{"id": "task-003", "title": "Create authentication service", "dependencies": ["task-001"]}
+
+// task-004.json
+{"id": "task-004", "title": "Create user routes and middleware", "dependencies": ["task-002", "task-003"]}
+```
+
+### Implementation Instructions
+
+When implementing the `/ralph` command planning phase:
+
+1. **Update state**: Set phase to `planning`
+2. **Load inputs**: Read research.json and decisions.json
+3. **Analyze scope**: Determine tasks needed based on request and decisions
+4. **Generate tasks**: Create task files following the schema
+5. **Assign dependencies**: Build dependency graph
+6. **Assign parallel groups**: Group tasks for parallel execution
+7. **Generate PRD**: Create human-readable prd.md
+8. **Update state**: Populate task_order and task_statuses
+9. **Transition**: Set phase to `planning_complete`
+
+**Example flow:**
+
+```
+# After decisions phase complete...
+
+1. Update state.json:
+   - phase: "planning"
+   - updated_at: <current timestamp>
+
+2. Load context:
+   - Read .ralph/research.json (if exists)
+   - Read .ralph/decisions.json
+
+3. Break down the task:
+   - Identify all work items needed
+   - Determine dependencies between items
+   - Size each item appropriately
+
+4. For each task:
+   - Generate task-NNN.json
+   - Assign id, title, description
+   - Define acceptance_criteria
+   - Set dependencies
+   - Calculate parallel_group
+   - List files_to_modify
+
+5. Generate PRD:
+   - Compile overview from original request
+   - Summarize research and decisions
+   - Document implementation phases
+   - Create dependency graph visualization
+   - List all files to modify
+   - Define overall acceptance criteria
+   - Write to .ralph/prd.md
+
+6. Update state.json:
+   - task_order: ["task-001", "task-002", ...]
+   - task_statuses: {"task-001": "pending", "task-002": "pending", ...}
+   - phase: "planning_complete"
+   - updated_at: <current timestamp>
+
+7. Inform user:
+   - "Planning complete! Review the plan at .ralph/prd.md"
+   - "When ready, run /clear to reset context, then /ralph-start to execute"
+```
+
+### Task File Validation
+
+Before finalizing, validate all task files:
+
+1. **Unique IDs**: No duplicate task IDs
+2. **Valid dependencies**: All referenced dependencies exist
+3. **No cycles**: Dependency graph is acyclic
+4. **Complete coverage**: All work items are accounted for
+5. **Proper sizing**: No task is too large for single session
+
+### Notes
+
+- Planning produces deterministic output from the same inputs
+- Tasks are stored as separate files for easy inspection and modification
+- Users can manually edit task files before running /ralph-start
+- The PRD is for human consumption; tasks are for subagent execution
+- Re-running /ralph regenerates the plan (use with caution after edits)
+- Simple tasks may have only 1-3 task files; complex tasks may have 10+
+- Task IDs are sequential but execution order follows parallel_group
