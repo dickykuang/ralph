@@ -72,8 +72,9 @@ For each parallel_group (1, 2, 3, ...):
 ### Step 4: Completion
 
 When all tasks complete successfully:
-- Update state.json phase to `completed`
-- Display summary (handled by subsequent story)
+1. Update state.json phase to `completed`
+2. Write detailed execution log to `.ralph/logs/execution.log`
+3. Display execution summary to user (see Execution Summary section below)
 
 ---
 
@@ -346,6 +347,138 @@ When spawning subagents, instruct them to:
 1. **Do NOT** print lengthy implementation details to the user
 2. **DO** return a structured result that will be saved to results/
 3. Focus output on confirmation that acceptance criteria were met
+
+---
+
+## Execution Summary
+
+**After all tasks complete successfully, display a summary and write detailed logs.**
+
+### Summary Display Format
+
+When execution completes, show this summary to the user:
+
+```
+✓ EXECUTION COMPLETE
+
+Tasks: [completed] completed, [failed] failed
+Files modified:
+  - [file1.ext]
+  - [file2.ext]
+  - [file3.ext]
+
+Detailed log: .ralph/logs/execution.log
+```
+
+### Example Summary Output
+
+```
+✓ EXECUTION COMPLETE
+
+Tasks: 5 completed, 0 failed
+Files modified:
+  - src/models/user.ts
+  - src/models/product.ts
+  - src/controllers/user.ts
+  - src/routes/api.ts
+  - tests/user.test.ts
+
+Detailed log: .ralph/logs/execution.log
+```
+
+### Collecting Summary Data
+
+During execution, track:
+
+1. **Task counts**: Increment completed/failed counters as tasks finish
+2. **Files modified**: Aggregate from each task's result (files_modified list)
+3. **Timestamps**: Track start and end time for duration calculation
+
+### Execution Log Format
+
+Write detailed execution log to `.ralph/logs/execution.log`:
+
+```
+================================================================================
+RALPH EXECUTION LOG
+================================================================================
+Started: [ISO 8601 timestamp]
+Completed: [ISO 8601 timestamp]
+Duration: [X minutes Y seconds]
+Original Request: [from state.json original_request]
+
+================================================================================
+SUMMARY
+================================================================================
+Total Tasks: [total count]
+Completed: [completed count]
+Failed: [failed count]
+Final Phase: completed
+
+================================================================================
+FILES MODIFIED
+================================================================================
+[sorted list of all unique files modified across all tasks]
+- src/models/user.ts
+- src/models/product.ts
+- ...
+
+================================================================================
+TASK EXECUTION DETAILS
+================================================================================
+
+--- Task: task-001 ---
+Title: [task title]
+Status: completed
+Started: [timestamp]
+Completed: [timestamp]
+Files Changed:
+  - [file1]: [brief description]
+  - [file2]: [brief description]
+Acceptance Criteria:
+  ✓ Criterion 1
+  ✓ Criterion 2
+
+--- Task: task-002 ---
+Title: [task title]
+...
+
+================================================================================
+END OF EXECUTION LOG
+================================================================================
+```
+
+### Log File Creation
+
+1. Create `.ralph/logs/` directory if it doesn't exist
+2. Write execution.log with UTF-8 encoding
+3. If file exists from previous run, overwrite it (each execution gets fresh log)
+
+### State Update on Completion
+
+Update state.json when execution completes:
+
+```json
+{
+  "phase": "completed",
+  "updated_at": "[ISO 8601 timestamp]",
+  "execution_summary": {
+    "started_at": "[ISO 8601 timestamp]",
+    "completed_at": "[ISO 8601 timestamp]",
+    "total_tasks": 5,
+    "completed_tasks": 5,
+    "failed_tasks": 0,
+    "files_modified": ["src/file1.ts", "src/file2.ts"]
+  }
+}
+```
+
+### Implementation Notes
+
+1. **Aggregate files**: Collect files_modified from each task result file in `.ralph/results/`
+2. **Deduplicate files**: Same file may be modified by multiple tasks - list unique files only
+3. **Sort files**: Display files in alphabetical order for easier scanning
+4. **Handle empty list**: If no files modified, show "No files modified"
 
 ---
 

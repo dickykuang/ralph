@@ -1,0 +1,231 @@
+{
+  "project": "Ralph",
+  "branchName": "ralph/task-orchestrator",
+  "description": "Ralph - Claude Task Orchestrator: A shareable repository of Claude Code slash commands that provides intelligent task orchestration using subagents for parallel execution and /clear for context management.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create install script for global slash commands",
+      "description": "As a developer, I want to run one install command so that Ralph slash commands are available globally in all my projects.",
+      "acceptanceCriteria": [
+        "Create install.sh at repository root",
+        "Script copies ralph.md, ralph-start.md, ralph-reset.md to ~/.claude/commands/",
+        "Script is idempotent (safe to run multiple times)",
+        "Script prompts before overwriting existing files",
+        "Script provides success/failure messages",
+        "chmod +x install.sh passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-002",
+      "title": "Create uninstall script",
+      "description": "As a developer, I want to cleanly remove Ralph commands so that I can uninstall if needed.",
+      "acceptanceCriteria": [
+        "Create uninstall.sh at repository root",
+        "Script removes ralph.md, ralph-start.md, ralph-reset.md from ~/.claude/commands/",
+        "Script confirms before deletion",
+        "Script handles missing files gracefully",
+        "chmod +x uninstall.sh passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-003",
+      "title": "Create project root detection utility",
+      "description": "As a developer, I want Ralph to find my project root automatically so that state files are stored consistently.",
+      "acceptanceCriteria": [
+        "Create utility section in ralph.md that detects project root",
+        "Searches upward for markers: .git, package.json, Cargo.toml, go.mod, pyproject.toml, mix.exs",
+        "Returns project root path or error message",
+        "Documents the detection logic in the command"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-004",
+      "title": "Create state.json structure and initialization",
+      "description": "As a developer, I want Ralph to maintain state in .ralph/ directory so that progress persists across sessions.",
+      "acceptanceCriteria": [
+        "Define state.json schema in ralph.md with: version, created_at, updated_at, phase, original_request, task_order, task_statuses",
+        "Phase values: research, decisions, planning, planning_complete, executing, completed, failed",
+        "Task status values: pending, in_progress, completed, failed",
+        "Include last_failure object for error tracking"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-005",
+      "title": "Create complexity assessment logic",
+      "description": "As a developer, I want Ralph to assess task complexity so that simple tasks skip research and complex tasks get full treatment.",
+      "acceptanceCriteria": [
+        "Add complexity assessment section to ralph.md",
+        "Simple tasks: single file edit, quick fix, typo correction",
+        "Complex tasks: new features, multi-file changes, unfamiliar tech, integrations",
+        "Document criteria for each complexity level"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-006",
+      "title": "Create research phase with WebSearch",
+      "description": "As a developer, I want Ralph to research technical specs and best practices so that planning is informed by authoritative sources.",
+      "acceptanceCriteria": [
+        "Add research phase section to ralph.md",
+        "Uses Task tool with subagent for web search",
+        "Searches for: relevant specs/RFCs, best practices, common pitfalls",
+        "Output format: JSON with specs, pitfalls, best_practices, references arrays",
+        "Saves output to .ralph/research.json"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-007",
+      "title": "Create decision surfacing phase",
+      "description": "As a developer, I want Ralph to surface important decisions so that I can resolve ambiguities before planning.",
+      "acceptanceCriteria": [
+        "Add decision surfacing section to ralph.md",
+        "Identifies items from research requiring user decision",
+        "Presents each decision with: context, why it matters, numbered options",
+        "User can ask follow-up questions before answering",
+        "Records decisions in .ralph/decisions.json",
+        "Planning does NOT proceed until critical decisions resolved"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-008",
+      "title": "Create planning phase with task generation",
+      "description": "As a developer, I want Ralph to generate a complete plan with discrete tasks so that execution can proceed autonomously.",
+      "acceptanceCriteria": [
+        "Add planning phase section to ralph.md",
+        "Generates PRD document saved to .ralph/prd.md",
+        "Creates discrete task files in .ralph/tasks/ directory",
+        "Each task has: id, title, description, acceptance_criteria, dependencies, parallel_group, files_to_modify",
+        "Tasks sized for single-session completion",
+        "Identifies parallelizable tasks (no dependencies between them)"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-009",
+      "title": "Create /ralph main command file",
+      "description": "As a developer, I want to invoke /ralph with my task so that research and planning happen automatically.",
+      "acceptanceCriteria": [
+        "Create ralph.md slash command in ~/.claude/commands/ format",
+        "Accepts natural language task description as argument",
+        "Orchestrates: project root detection -> complexity assessment -> research (if complex) -> decisions -> planning",
+        "Ends with instruction to review plan, run /clear, then run /ralph-start",
+        "Updates state.json at each phase transition"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-010",
+      "title": "Create /ralph-start execution command",
+      "description": "As a developer, I want /ralph-start to execute the plan so that tasks run via subagents with fresh context.",
+      "acceptanceCriteria": [
+        "Create ralph-start.md slash command",
+        "Reads state from .ralph/ directory",
+        "Resumes from last incomplete task (skip completed)",
+        "Uses Task tool to spawn subagents for each task",
+        "Spawns independent tasks in parallel (multiple Task calls in one message)",
+        "Waits for dependent tasks before spawning next group"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-011",
+      "title": "Add fail-fast behavior to execution",
+      "description": "As a developer, I want execution to stop on any failure so that I can fix issues before more work happens.",
+      "acceptanceCriteria": [
+        "On ANY task failure, ALL execution stops immediately",
+        "Failed task details logged to .ralph/logs/errors.log",
+        "state.json updated with last_failure object",
+        "Error message shows task id, error details, and file to check"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-012",
+      "title": "Add progress updates during execution",
+      "description": "As a developer, I want brief status updates so that I know progress without verbose output.",
+      "acceptanceCriteria": [
+        "Shows task name and status when starting: 'Starting: US-003 - Create API endpoint'",
+        "Shows completion status when task finishes",
+        "Errors show enough detail to understand what failed",
+        "No lengthy explanations or 'let me think' verbosity",
+        "Detailed results in .ralph/results/ not streamed"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-013",
+      "title": "Create /ralph-reset command",
+      "description": "As a developer, I want /ralph-reset to clear state so that I can start fresh.",
+      "acceptanceCriteria": [
+        "Create ralph-reset.md slash command",
+        "Prompts for confirmation before deleting",
+        "Removes .ralph/ directory and all contents",
+        "Provides success message after reset"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-014",
+      "title": "Add execution summary report",
+      "description": "As a developer, I want a summary report after execution so that I know what was accomplished.",
+      "acceptanceCriteria": [
+        "After all tasks complete, show summary",
+        "Summary includes: tasks completed count, tasks failed count, files modified list",
+        "Writes detailed log to .ralph/logs/execution.log",
+        "Updates state.json phase to 'completed'"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Completed 2026-01-27"
+    },
+    {
+      "id": "US-015",
+      "title": "Test full workflow end-to-end",
+      "description": "As a developer, I want to verify the complete workflow works so that Ralph is ready for use.",
+      "acceptanceCriteria": [
+        "Run install.sh successfully",
+        "Verify /ralph command is available",
+        "Test /ralph with a simple task",
+        "Verify .ralph/ directory created with correct structure",
+        "Test /ralph-start executes a task",
+        "Test /ralph-reset clears state"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
