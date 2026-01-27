@@ -392,3 +392,236 @@ When implementing the /ralph command, assess complexity early:
 - User can override complexity assessment if they disagree
 - Simple tasks still generate plans, just with less overhead
 - Complexity is assessed once at the start, not re-evaluated mid-workflow
+
+---
+
+## Research Phase
+
+For complex tasks, Ralph performs automated research to gather technical specifications, best practices, and common pitfalls before planning. This ensures the plan is informed by authoritative sources rather than relying solely on general knowledge.
+
+### When Research Runs
+
+Research runs **only for complex tasks**. Simple tasks skip directly to the decisions phase (or planning if no decisions needed).
+
+```
+Complex task detected
+    ↓
+[research] phase begins
+    ↓
+Spawn research subagent with Task tool
+    ↓
+Subagent performs web searches
+    ↓
+Results saved to .ralph/research.json
+    ↓
+State updated to [decisions] phase
+```
+
+### Research Goals
+
+The research subagent gathers information in these categories:
+
+| Category | Description | Examples |
+|----------|-------------|----------|
+| **Specifications** | Official specs, RFCs, documentation | OAuth 2.0 RFC, GraphQL spec, REST API guidelines |
+| **Best Practices** | Industry-standard approaches | Error handling patterns, security best practices |
+| **Common Pitfalls** | Known issues and anti-patterns | Race conditions, security vulnerabilities, performance traps |
+| **References** | Authoritative sources for further reading | Official docs, trusted tutorials, GitHub repos |
+
+### Spawning the Research Subagent
+
+Use the Task tool with `subagent_type: "general-purpose"` to spawn a research agent. The agent has access to WebSearch for gathering information.
+
+**Task invocation:**
+
+```
+Task tool parameters:
+  description: "Research [brief topic description]"
+  subagent_type: "general-purpose"
+  prompt: |
+    Research the following task to gather technical information:
+
+    TASK: [user's original request]
+
+    Search for and compile:
+    1. **Specifications**: Find relevant RFCs, official specs, or authoritative documentation
+    2. **Best Practices**: Search for recommended approaches and patterns
+    3. **Common Pitfalls**: Find known issues, anti-patterns, and things to avoid
+    4. **References**: Collect links to authoritative sources
+
+    Use WebSearch to find current, authoritative information.
+
+    Return your findings as JSON in this exact format:
+    {
+      "specs": [
+        {"title": "...", "summary": "...", "url": "..."}
+      ],
+      "best_practices": [
+        {"practice": "...", "rationale": "..."}
+      ],
+      "pitfalls": [
+        {"issue": "...", "consequence": "...", "prevention": "..."}
+      ],
+      "references": [
+        {"title": "...", "url": "...", "relevance": "..."}
+      ]
+    }
+```
+
+### Output Format: research.json
+
+The research findings are saved to `.ralph/research.json` with this structure:
+
+```json
+{
+  "task": "implement OAuth2 login with Google provider",
+  "researched_at": "2026-01-27T12:34:56Z",
+  "specs": [
+    {
+      "title": "OAuth 2.0 Authorization Framework (RFC 6749)",
+      "summary": "Defines the core OAuth 2.0 protocol for authorization delegation",
+      "url": "https://datatracker.ietf.org/doc/html/rfc6749"
+    },
+    {
+      "title": "OpenID Connect Core 1.0",
+      "summary": "Identity layer on top of OAuth 2.0 for authentication",
+      "url": "https://openid.net/specs/openid-connect-core-1_0.html"
+    }
+  ],
+  "best_practices": [
+    {
+      "practice": "Use state parameter to prevent CSRF attacks",
+      "rationale": "The state parameter binds the authorization request to the user's session"
+    },
+    {
+      "practice": "Store tokens securely, never in localStorage",
+      "rationale": "localStorage is vulnerable to XSS attacks; use httpOnly cookies"
+    },
+    {
+      "practice": "Implement token refresh flow",
+      "rationale": "Access tokens should be short-lived; refresh tokens enable seamless re-authentication"
+    }
+  ],
+  "pitfalls": [
+    {
+      "issue": "Not validating the redirect URI",
+      "consequence": "Open redirect vulnerability allowing token theft",
+      "prevention": "Whitelist exact redirect URIs in OAuth provider config"
+    },
+    {
+      "issue": "Storing sensitive tokens in client-side storage",
+      "consequence": "XSS attacks can steal authentication tokens",
+      "prevention": "Use server-side sessions or httpOnly cookies"
+    }
+  ],
+  "references": [
+    {
+      "title": "Google OAuth 2.0 Documentation",
+      "url": "https://developers.google.com/identity/protocols/oauth2",
+      "relevance": "Official docs for implementing Google OAuth"
+    },
+    {
+      "title": "OWASP OAuth Security Cheat Sheet",
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/OAuth_Cheat_Sheet.html",
+      "relevance": "Security best practices for OAuth implementations"
+    }
+  ]
+}
+```
+
+### Schema Definitions
+
+#### Spec Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | Name of the specification or RFC |
+| `summary` | string | Brief description of what it covers |
+| `url` | string | Link to the official document |
+
+#### Best Practice Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `practice` | string | The recommended practice |
+| `rationale` | string | Why this practice matters |
+
+#### Pitfall Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `issue` | string | Description of the pitfall |
+| `consequence` | string | What can go wrong |
+| `prevention` | string | How to avoid it |
+
+#### Reference Object
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | Title of the resource |
+| `url` | string | URL to the resource |
+| `relevance` | string | Why this reference is useful |
+
+### Implementation Instructions
+
+When implementing the `/ralph` command, execute research as follows:
+
+1. **Check complexity**: Only run research for complex tasks
+2. **Update state**: Set phase to `research` before starting
+3. **Spawn subagent**: Use Task tool with the prompt template above
+4. **Parse results**: Extract JSON from subagent response
+5. **Save research**: Write results to `.ralph/research.json`
+6. **Update state**: Transition phase to `decisions`
+
+**Example flow in /ralph command:**
+
+```
+# After complexity assessment determines task is complex...
+
+1. Update state.json:
+   - phase: "research"
+   - updated_at: <current timestamp>
+
+2. Call Task tool:
+   - description: "Research [topic]"
+   - subagent_type: "general-purpose"
+   - prompt: [research prompt with user's task]
+
+3. When subagent returns:
+   - Parse JSON from response
+   - Add metadata (task, researched_at)
+   - Write to .ralph/research.json
+
+4. Update state.json:
+   - phase: "decisions"
+   - updated_at: <current timestamp>
+```
+
+### Handling Research Failures
+
+If the research subagent fails or returns invalid JSON:
+
+1. Log the error to `.ralph/logs/errors.log`
+2. Create a minimal research.json with empty arrays
+3. Proceed to decisions phase (don't block on research failure)
+4. Note in decisions that research was incomplete
+
+```json
+{
+  "task": "...",
+  "researched_at": "...",
+  "error": "Research subagent failed: [error details]",
+  "specs": [],
+  "best_practices": [],
+  "pitfalls": [],
+  "references": []
+}
+```
+
+### Notes
+
+- Research adds latency but prevents costly mistakes in planning
+- The subagent runs autonomously and returns when complete
+- Results inform the decisions phase (what needs user input)
+- For security-sensitive tasks, research is especially valuable
+- Research is cached; re-running /ralph on same task reuses existing research
