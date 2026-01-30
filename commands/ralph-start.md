@@ -89,6 +89,16 @@ Task tool parameters:
   prompt: |
     Execute this task from the Ralph plan:
 
+    OVERALL CONTEXT:
+    You are executing one task as part of a larger implementation plan.
+    Original Request: [from state.json original_request]
+
+    IMPORTANT: Before implementing, read `.ralph/prd.md` to understand the full
+    project requirements, architecture decisions, and how this task fits into
+    the overall plan.
+
+    ---
+
     TASK ID: [task.id]
     TITLE: [task.title]
 
@@ -101,7 +111,7 @@ Task tool parameters:
     FILES TO MODIFY:
     [Each file path as a bullet point]
 
-    CONTEXT:
+    TASK-SPECIFIC CONTEXT:
     [task.context if present, or "No additional context"]
 
     DECISIONS MADE:
@@ -110,10 +120,11 @@ Task tool parameters:
     ---
 
     Instructions:
-    1. Implement the task following the description
-    2. Ensure ALL acceptance criteria are met
-    3. Only modify the files listed (or closely related files if necessary)
-    4. Run relevant tests if applicable
+    1. Read `.ralph/prd.md` to understand the overall project context
+    2. Implement the task following the description
+    3. Ensure ALL acceptance criteria are met
+    4. Only modify the files listed (or closely related files if necessary)
+    5. Run relevant tests if applicable
 
     OUTPUT REQUIREMENTS - CRITICAL:
     - Do NOT output lengthy explanations or implementation details
