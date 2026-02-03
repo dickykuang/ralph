@@ -17,9 +17,10 @@ Execute these phases in order, updating state.json at each transition:
 ### Phase 0: Initialization
 
 1. **Detect project root** using the algorithm in "Utility: Project Root Detection" section
-2. **Create `.ralph/` directory** if it doesn't exist
-3. **Initialize state.json** with the template from "State Management: state.json" section
-4. **Save the original request** to state.json `original_request` field
+2. **Archive existing Ralph state** if prior metadata exists (see "Utility: Archive Previous Run")
+3. **Create `.ralph/` directory** if it doesn't exist
+4. **Initialize state.json** with the template from "State Management: state.json" section
+5. **Save the original request** to state.json `original_request` field
 
 ### Phase 1: Complexity Assessment
 
@@ -56,11 +57,11 @@ Only run this phase if complexity is "complex":
 2. **Load research.json and decisions.json** as context
 3. **Generate PRD document** following "Planning Phase" section structure
 4. **Create task files** in `.ralph/tasks/` directory:
-   - Each task has: id, title, description, acceptance_criteria, dependencies, parallel_group, files_to_modify
+   - Each task has: id, title, description, acceptance_criteria, dependencies, priority, files_to_modify
    - Tasks sized for single-session completion
-   - Parallel groups assigned based on dependencies
+   - Priorities assigned based on risk, dependencies, and sequencing needs
 5. **Update state.json**:
-   - Populate `task_order` with ordered list of task IDs
+   - Populate `task_order` with ordered list of task IDs (dependencies first, then priority)
    - Populate `task_statuses` with all tasks set to "pending"
    - Set `phase` to "planning_complete"
 
@@ -178,6 +179,53 @@ echo "$PROJECT_ROOT"
 
 ---
 
+## Utility: Archive Previous Run
+
+If a prior Ralph run exists in the project, archive it before creating new state. This prevents overwriting prior plans and enables retro review.
+
+### When to Archive
+
+Archive if any of these exist in `{PROJECT_ROOT}/.ralph/`:
+- `state.json`
+- `prd.md`
+- `decisions.json`
+- `research.json`
+- `tasks/`
+- `results/`
+- `logs/`
+
+### Archive Destination
+
+Create:
+```
+{PROJECT_ROOT}/.ralph/archive/{timestamp}-{slug}/
+```
+
+- `timestamp`: current ISO 8601 datetime in UTC, `YYYYMMDD-HHMMSSZ`
+- `slug`: derived from the previous run's `original_request` in `state.json` if available, otherwise `previous-run`
+
+### What to Move
+
+Move the following into the archive directory if they exist:
+- `state.json`
+- `prd.md`
+- `decisions.json`
+- `research.json`
+- `tasks/`
+- `results/`
+- `logs/`
+- `commits.json` (if present)
+- `retro/` (if present)
+
+Do NOT move the `archive/` directory itself.
+
+### Notes
+
+- Archiving should be fast and non-destructive.
+- If `state.json` is missing, use `previous-run` as the slug.
+
+---
+
 ## State Management: state.json
 
 Ralph maintains persistent state in `.ralph/state.json` to track progress across sessions and enable resumable execution.
@@ -191,15 +239,18 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
     ├── research.json       # Research findings (if complex task)
     ├── decisions.json      # User decisions
     ├── prd.md              # Generated PRD document
+    ├── commits.json        # Task-to-commit mapping (created during execution)
     ├── tasks/              # Individual task files
     │   ├── task-001.json
     │   ├── task-002.json
     │   └── ...
     ├── results/            # Task execution results
     │   └── ...
-    └── logs/               # Execution logs
-        ├── execution.log
-        └── errors.log
+    ├── logs/               # Execution logs
+    │   ├── execution.log
+    │   └── errors.log
+    ├── retro/              # Retro review data
+    └── archive/            # Archived prior runs
 ```
 
 ### state.json Schema
@@ -210,14 +261,17 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
   "created_at": "2026-01-27T12:34:56Z",
   "updated_at": "2026-01-27T12:45:00Z",
   "phase": "planning",
+  "complexity": "complex",
   "original_request": "Build a REST API for user management",
+  "base_commit": "abc1234",
   "task_order": ["task-001", "task-002", "task-003"],
   "task_statuses": {
     "task-001": "completed",
     "task-002": "in_progress",
     "task-003": "pending"
   },
-  "last_failure": null
+  "last_failure": null,
+  "execution_summary": null
 }
 ```
 
@@ -229,10 +283,13 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | `created_at` | string | ISO 8601 timestamp when state was created |
 | `updated_at` | string | ISO 8601 timestamp of last state update |
 | `phase` | string | Current workflow phase (see Phase Values) |
+| `complexity` | string | Task complexity classification (`simple` or `complex`) |
 | `original_request` | string | The user's original task description |
-| `task_order` | array | Ordered list of task IDs for execution |
+| `base_commit` | string\|null | Git commit hash at start of execution |
+| `task_order` | array | Ordered list of task IDs for execution (dependencies, then priority) |
 | `task_statuses` | object | Map of task ID to status (see Task Status Values) |
 | `last_failure` | object\|null | Details of the most recent failure, if any |
+| `execution_summary` | object\|null | Execution summary data (set on completion) |
 
 ### Phase Values
 
@@ -289,10 +346,13 @@ When `/ralph` is invoked, create the state file if it doesn't exist:
   "created_at": "<current ISO 8601 timestamp>",
   "updated_at": "<current ISO 8601 timestamp>",
   "phase": "research",
+  "complexity": null,
   "original_request": "<user's task description>",
+  "base_commit": null,
   "task_order": [],
   "task_statuses": {},
-  "last_failure": null
+  "last_failure": null,
+  "execution_summary": null
 }
 ```
 
@@ -329,8 +389,8 @@ The agent should read the current state, modify the necessary fields, and write 
 ### Notes
 
 - Always update `updated_at` when modifying state
-- The `task_order` array determines execution sequence and parallel grouping
-- Tasks with no dependencies can run in parallel (handled by /ralph-start)
+- The `task_order` array determines execution sequence
+- Tasks execute sequentially based on dependencies and priority (handled by /ralph-start)
 - On failure, execution halts immediately and `phase` becomes `failed`
 
 ---
@@ -578,11 +638,13 @@ The research findings are saved to `.ralph/research.json` with this structure:
   "researched_at": "2026-01-27T12:34:56Z",
   "specs": [
     {
+      "id": "spec-1",
       "title": "OAuth 2.0 Authorization Framework (RFC 6749)",
       "summary": "Defines the core OAuth 2.0 protocol for authorization delegation",
       "url": "https://datatracker.ietf.org/doc/html/rfc6749"
     },
     {
+      "id": "spec-2",
       "title": "OpenID Connect Core 1.0",
       "summary": "Identity layer on top of OAuth 2.0 for authentication",
       "url": "https://openid.net/specs/openid-connect-core-1_0.html"
@@ -590,25 +652,30 @@ The research findings are saved to `.ralph/research.json` with this structure:
   ],
   "best_practices": [
     {
+      "id": "bp-1",
       "practice": "Use state parameter to prevent CSRF attacks",
       "rationale": "The state parameter binds the authorization request to the user's session"
     },
     {
+      "id": "bp-2",
       "practice": "Store tokens securely, never in localStorage",
       "rationale": "localStorage is vulnerable to XSS attacks; use httpOnly cookies"
     },
     {
+      "id": "bp-3",
       "practice": "Implement token refresh flow",
       "rationale": "Access tokens should be short-lived; refresh tokens enable seamless re-authentication"
     }
   ],
   "pitfalls": [
     {
+      "id": "pitfall-1",
       "issue": "Not validating the redirect URI",
       "consequence": "Open redirect vulnerability allowing token theft",
       "prevention": "Whitelist exact redirect URIs in OAuth provider config"
     },
     {
+      "id": "pitfall-2",
       "issue": "Storing sensitive tokens in client-side storage",
       "consequence": "XSS attacks can steal authentication tokens",
       "prevention": "Use server-side sessions or httpOnly cookies"
@@ -616,11 +683,13 @@ The research findings are saved to `.ralph/research.json` with this structure:
   ],
   "references": [
     {
+      "id": "ref-1",
       "title": "Google OAuth 2.0 Documentation",
       "url": "https://developers.google.com/identity/protocols/oauth2",
       "relevance": "Official docs for implementing Google OAuth"
     },
     {
+      "id": "ref-2",
       "title": "OWASP OAuth Security Cheat Sheet",
       "url": "https://cheatsheetseries.owasp.org/cheatsheets/OAuth_Cheat_Sheet.html",
       "relevance": "Security best practices for OAuth implementations"
@@ -635,6 +704,7 @@ The research findings are saved to `.ralph/research.json` with this structure:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `id` | string | Stable ID (spec-1, spec-2, ...) |
 | `title` | string | Name of the specification or RFC |
 | `summary` | string | Brief description of what it covers |
 | `url` | string | Link to the official document |
@@ -643,6 +713,7 @@ The research findings are saved to `.ralph/research.json` with this structure:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `id` | string | Stable ID (bp-1, bp-2, ...) |
 | `practice` | string | The recommended practice |
 | `rationale` | string | Why this practice matters |
 
@@ -650,6 +721,7 @@ The research findings are saved to `.ralph/research.json` with this structure:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `id` | string | Stable ID (pitfall-1, pitfall-2, ...) |
 | `issue` | string | Description of the pitfall |
 | `consequence` | string | What can go wrong |
 | `prevention` | string | How to avoid it |
@@ -658,9 +730,19 @@ The research findings are saved to `.ralph/research.json` with this structure:
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `id` | string | Stable ID (ref-1, ref-2, ...) |
 | `title` | string | Title of the resource |
 | `url` | string | URL to the resource |
 | `relevance` | string | Why this reference is useful |
+
+### Reference ID Rules
+
+- IDs are stable and sequential by type:
+  - Specs: `spec-1`, `spec-2`, ...
+  - Best practices: `bp-1`, `bp-2`, ...
+  - Pitfalls: `pitfall-1`, `pitfall-2`, ...
+  - References: `ref-1`, `ref-2`, ...
+- Task files should only reference these IDs in `task.context.research_refs`.
 
 ### Implementation Instructions
 
@@ -1017,7 +1099,7 @@ Generate PRD document (.ralph/prd.md)
     ↓
 Create discrete task files (.ralph/tasks/)
     ↓
-Identify parallel execution groups
+Assign task priorities
     ↓
 State updated to [planning_complete]
     ↓
@@ -1106,7 +1188,11 @@ Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files a
     "Migration runs successfully without errors"
   ],
   "dependencies": [],
-  "parallel_group": 1,
+  "priority": 2,
+  "reuse_notes": [
+    "Prefer existing password hashing helper in lib/myapp/accounts/passwords.ex",
+    "Reuse migration template in priv/repo/migrations/_template.exs"
+  ],
   "files_to_modify": [
     "lib/myapp/accounts/user.ex",
     "priv/repo/migrations/*_create_users.exs"
@@ -1130,11 +1216,20 @@ Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files a
 | `description` | string | Yes | Detailed description of what to implement |
 | `acceptance_criteria` | array | Yes | List of specific, verifiable criteria |
 | `dependencies` | array | Yes | List of task IDs that must complete first |
-| `parallel_group` | number | Yes | Group number for parallel execution (1, 2, 3...) |
+| `priority` | number | Yes | Execution priority (1 = highest, 5 = lowest) |
+| `reuse_notes` | array | No | Pointers to existing helpers/utilities to reuse |
 | `files_to_modify` | array | Yes | Files to create or modify (glob patterns allowed) |
 | `context` | object | No | Additional context from research/decisions |
 | `status` | string | Yes | Current status (pending, in_progress, completed, failed) |
 | `estimated_complexity` | string | No | low, medium, or high |
+
+#### Priority Guidelines
+
+- **1**: Foundational work that unblocks others
+- **2**: Core feature path
+- **3**: Supporting features and integrations
+- **4**: Polish, refactors, and non-blocking improvements
+- **5**: Optional or nice-to-have work
 
 #### Acceptance Criteria Guidelines
 
@@ -1181,56 +1276,41 @@ task-005 (Integration tests)
 
 ```json
 // task-001.json
-{"id": "task-001", "dependencies": [], "parallel_group": 1}
+{"id": "task-001", "dependencies": [], "priority": 1}
 
 // task-002.json
-{"id": "task-002", "dependencies": ["task-001"], "parallel_group": 2}
+{"id": "task-002", "dependencies": ["task-001"], "priority": 2}
 
 // task-003.json
-{"id": "task-003", "dependencies": ["task-001"], "parallel_group": 2}
+{"id": "task-003", "dependencies": ["task-001"], "priority": 2}
 
 // task-004.json
-{"id": "task-004", "dependencies": ["task-002", "task-003"], "parallel_group": 3}
+{"id": "task-004", "dependencies": ["task-002", "task-003"], "priority": 3}
 
 // task-005.json
-{"id": "task-005", "dependencies": ["task-004"], "parallel_group": 4}
+{"id": "task-005", "dependencies": ["task-004"], "priority": 4}
 ```
 
-### Parallel Execution Groups
+### Priority and Sequencing
 
-Tasks with the same `parallel_group` number and satisfied dependencies can execute simultaneously. This enables efficient use of subagents.
+Tasks execute sequentially. Use `priority` to order work within dependency constraints.
 
-#### Parallel Group Assignment Rules
+#### Priority Rules
 
-1. **Group 1**: Tasks with no dependencies
-2. **Group 2**: Tasks that depend only on Group 1 tasks
-3. **Group N**: Tasks that depend only on tasks in groups < N
-4. **Same group = parallel**: Tasks in the same group run together
+1. **1 = highest priority, 5 = lowest**
+2. **Dependencies win**: If task A depends on task B, B must run first regardless of priority
+3. **Eligible task ordering**: Among tasks whose dependencies are complete, pick the lowest priority number
+4. **Tie-breaker**: If priorities match, use task ID order (task-001 before task-002)
 
-#### Identifying Parallelizable Tasks
-
-Tasks can run in parallel if:
-- They have the same `parallel_group` number
-- All their dependencies are complete
-- They don't modify the same files
-
-**Example parallel execution:**
+#### Example ordering
 
 ```
-Group 1 (parallel):
-  └── task-001: Create User model
-  └── task-006: Create Product model
+Eligible set after task-001:
+  task-002 (priority 2)
+  task-003 (priority 2)
+  task-006 (priority 4)
 
-Group 2 (parallel, after Group 1):
-  └── task-002: Create User controller
-  └── task-003: Create Auth service
-  └── task-007: Create Product controller
-
-Group 3 (sequential from Group 2):
-  └── task-004: Create User routes
-
-Group 4 (after Group 3):
-  └── task-005: Integration tests
+Next task: task-002 (tie broken by ID)
 ```
 
 ### Task Sizing Guidelines
@@ -1280,6 +1360,23 @@ If a task would be too large:
 {"id": "task-004", "title": "Create user routes and middleware", "dependencies": ["task-002", "task-003"]}
 ```
 
+### Reuse Sweep
+
+Before generating tasks, scan the codebase for existing helpers/utilities that can be reused. This reduces duplicate functions and keeps implementation consistent.
+
+Guidelines:
+- Derive search keywords from the task description and acceptance criteria
+- Search in likely directories for the project (e.g., `src/`, `lib/`, `app/`, `packages/`)
+- Prefer existing helpers even if they need small extensions
+- Record findings in `reuse_notes` for each task
+
+Example commands:
+```bash
+rg -n "hash|encrypt|token" src lib
+rg -n "validator|validation|schema" src lib
+rg -n "client|api|http" src lib
+```
+
 ### Implementation Instructions
 
 When implementing the `/ralph` command planning phase:
@@ -1287,12 +1384,13 @@ When implementing the `/ralph` command planning phase:
 1. **Update state**: Set phase to `planning`
 2. **Load inputs**: Read research.json and decisions.json
 3. **Analyze scope**: Determine tasks needed based on request and decisions
-4. **Generate tasks**: Create task files following the schema
-5. **Assign dependencies**: Build dependency graph
-6. **Assign parallel groups**: Group tasks for parallel execution
-7. **Generate PRD**: Create human-readable prd.md
-8. **Update state**: Populate task_order and task_statuses
-9. **Transition**: Set phase to `planning_complete`
+4. **Reuse sweep**: Search the codebase for existing helpers/utilities and capture findings
+5. **Generate tasks**: Create task files following the schema
+6. **Assign dependencies**: Build dependency graph
+7. **Assign priorities**: Set priority based on dependencies, risk, and sequencing needs
+8. **Generate PRD**: Create human-readable prd.md
+9. **Update state**: Populate task_order (sorted by dependencies then priority) and task_statuses
+10. **Transition**: Set phase to `planning_complete`
 
 **Example flow:**
 
@@ -1312,15 +1410,20 @@ When implementing the `/ralph` command planning phase:
    - Determine dependencies between items
    - Size each item appropriately
 
-4. For each task:
+4. Reuse sweep:
+   - Search for existing helpers/utilities related to each task
+   - Record findings for reuse_notes
+
+5. For each task:
    - Generate task-NNN.json
    - Assign id, title, description
    - Define acceptance_criteria
    - Set dependencies
-   - Calculate parallel_group
+   - Calculate priority
+   - Identify existing helpers/utilities to reuse and add reuse_notes
    - List files_to_modify
 
-5. Generate PRD:
+6. Generate PRD:
    - Compile overview from original request
    - Summarize research and decisions
    - Document implementation phases
@@ -1329,13 +1432,13 @@ When implementing the `/ralph` command planning phase:
    - Define overall acceptance criteria
    - Write to .ralph/prd.md
 
-6. Update state.json:
+7. Update state.json:
    - task_order: ["task-001", "task-002", ...]
    - task_statuses: {"task-001": "pending", "task-002": "pending", ...}
    - phase: "planning_complete"
    - updated_at: <current timestamp>
 
-7. Inform user:
+8. Inform user:
    - "Planning complete! Review the plan at .ralph/prd.md"
    - "When ready, run /clear to reset context, then /ralph-start to execute"
 ```
@@ -1348,7 +1451,8 @@ Before finalizing, validate all task files:
 2. **Valid dependencies**: All referenced dependencies exist
 3. **No cycles**: Dependency graph is acyclic
 4. **Complete coverage**: All work items are accounted for
-5. **Proper sizing**: No task is too large for single session
+5. **Valid priority**: Each task has priority 1-5
+6. **Proper sizing**: No task is too large for single session
 
 ### Notes
 
@@ -1358,4 +1462,4 @@ Before finalizing, validate all task files:
 - The PRD is for human consumption; tasks are for subagent execution
 - Re-running /ralph regenerates the plan (use with caution after edits)
 - Simple tasks may have only 1-3 task files; complex tasks may have 10+
-- Task IDs are sequential but execution order follows parallel_group
+- Task IDs are sequential but execution order follows priority and dependencies

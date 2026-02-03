@@ -1,6 +1,6 @@
 # Ralph Start - Execute Tasks
 
-You are Ralph's execution engine. Your job is to execute the planned tasks from `.ralph/` directory using subagents for parallel execution with fresh context.
+You are Ralph's execution engine. Your job is to execute the planned tasks from `.ralph/` directory using subagents for sequential execution with fresh context.
 
 ## Pre-Execution Checks
 
@@ -8,8 +8,12 @@ Before executing, verify the following:
 
 1. **Check for .ralph/ directory**: Must exist in project root
 2. **Read state.json**: Verify phase is `planning_complete` or `executing`
-3. **Read task files**: Load all tasks from `.ralph/tasks/`
-4. **Verify tasks exist**: At least one task file must be present
+3. **Verify git repository**: Must be inside a git repo
+4. **Verify clean working tree**: `git status --porcelain` must be empty
+5. **Verify plan artifacts**: `.ralph/prd.md` and `.ralph/decisions.json` should exist
+6. **Read task files**: Load all tasks from `.ralph/tasks/`
+7. **Verify tasks exist**: At least one task file must be present
+8. **Reuse notes check**: Warn if a task appears to need reuse but has no `reuse_notes`
 
 If any check fails, report the error and stop.
 
@@ -17,57 +21,69 @@ If any check fails, report the error and stop.
 
 ## Execution Workflow
 
+### Reuse Notes Heuristic
+
+Before execution, perform a lightweight check:
+
+- If a task title or description contains keywords like `auth`, `token`, `validation`, `schema`, `client`, `api`, `http`, `db`, `cache`, or `logger`
+- AND `reuse_notes` is missing or empty
+
+Then print a warning:
+```
+Warning: task-XXX may benefit from reuse_notes but none were provided.
+Consider updating the plan or proceed as-is.
+```
+
+Do not block execution; this is advisory only.
+
 ### Step 1: Load State and Tasks
 
 1. Read `.ralph/state.json`
-2. Read all task files from `.ralph/tasks/` directory
-3. Build execution plan from `task_order` in state.json
-4. Identify current progress from `task_statuses`
+2. Read `.ralph/decisions.json`
+3. Read `.ralph/research.json` (if exists)
+4. Read `.ralph/commits.json` (if exists)
+5. Read `.ralph/results/` for prior task summaries (if exists)
+6. Read all task files from `.ralph/tasks/` directory
+7. Build execution plan from `task_order` in state.json (already sorted by dependencies, then priority)
+8. Identify current progress from `task_statuses`
 
 ### Step 2: Update State to Executing
 
 Update state.json:
 - Set `phase` to `executing`
 - Set `updated_at` to current timestamp
+- If `base_commit` is null, set it to current `HEAD` hash
 
-### Step 3: Execute by Parallel Groups
+### Step 3: Execute Sequentially by Priority
 
-Process tasks by their `parallel_group` number, starting from the lowest group that has pending tasks:
+Process tasks in the exact order listed in `task_order` (already sorted by dependencies, then priority).
 
 ```
-For each parallel_group (1, 2, 3, ...):
-    1. Find all tasks in this group that are:
-       - Status is "pending"
-       - All dependencies have status "completed"
+For each task in task_order:
+    1. If status is "completed", skip
+    2. If status is "in_progress" or "pending":
+       - Verify all dependencies are "completed"
+       - If dependencies are missing, stop with an error (planning bug)
 
-    2. If no eligible tasks in this group, move to next group
+    3. Mark task as "in_progress" in state.json
+    4. Spawn the subagent for the task
+    5. Wait for the subagent to complete
 
-    3. Spawn ALL eligible tasks in parallel:
-       - Use MULTIPLE Task tool calls in a SINGLE message
-       - Each subagent gets the task's context and instructions
+    6. If success:
+       - Update task status to "completed" in state.json
+       - Save result to .ralph/results/task-NNN.md
+       - Create a git commit for the task (see Commit Policy)
+       - Show: "✓ Completed: [task-id] - [title]"
 
-    4. Wait for ALL spawned tasks to complete
-
-    5. Check results - process ALL returned tasks:
-
-       For each completed task:
-         - Update task status to "completed" in state.json
-         - Save result to .ralph/results/task-NNN.md
-         - Show: "✓ Completed: [task-id] - [title]"
-
-       If ANY task failed:
-         - FAIL-FAST: Stop processing immediately
-         - Update failed task status to "failed" in state.json
-         - Log error to .ralph/logs/errors.log (see Error Handling)
-         - Set phase to "failed" in state.json
-         - Set last_failure object in state.json
-         - Report failure with task ID, error, and log file path
-         - EXIT - do NOT continue to next group or task
-
-    6. Only if ALL tasks in group succeeded, move to next parallel_group
+    7. If failure:
+       - FAIL-FAST: Stop processing immediately
+       - Update failed task status to "failed" in state.json
+       - Log error to .ralph/logs/errors.log (see Error Handling)
+       - Set phase to "failed" in state.json
+       - Set last_failure object in state.json
+       - Report failure with task ID, error, and log file path
+       - EXIT - do NOT continue to next task
 ```
-
-**IMPORTANT**: If parallel tasks are running and one fails, you must still wait for all spawned tasks to return (they're already running). Process their results, but do NOT spawn any new tasks after detecting a failure.
 
 ### Step 4: Completion
 
@@ -75,6 +91,7 @@ When all tasks complete successfully:
 1. Update state.json phase to `completed`
 2. Write detailed execution log to `.ralph/logs/execution.log`
 3. Display execution summary to user (see Execution Summary section below)
+4. Suggest `/ralph-retro` to review commits
 
 ---
 
@@ -111,6 +128,18 @@ Task tool parameters:
     FILES TO MODIFY:
     [Each file path as a bullet point]
 
+    DEPENDENCIES:
+    [List each task dependency with commit hash if available]
+
+    PRIOR CHANGES:
+    [Brief summaries from .ralph/results/task-XXX.md for each dependency, if available]
+
+    RESEARCH NOTES:
+    [If task.context.research_refs exists, include the referenced items from .ralph/research.json]
+
+    REUSE NOTES:
+    [If task.reuse_notes exists, list the helpers/utilities to prefer]
+
     TASK-SPECIFIC CONTEXT:
     [task.context if present, or "No additional context"]
 
@@ -125,6 +154,8 @@ Task tool parameters:
     3. Ensure ALL acceptance criteria are met
     4. Only modify the files listed (or closely related files if necessary)
     5. Run relevant tests if applicable
+    6. Do NOT run `git add` or `git commit` (the orchestrator handles commits)
+    7. Prefer existing helpers/utilities. Before creating a new function, search the codebase for an existing one. Only add a new function if no suitable helper exists, and keep it centralized (avoid duplicates).
 
     OUTPUT REQUIREMENTS - CRITICAL:
     - Do NOT output lengthy explanations or implementation details
@@ -139,35 +170,26 @@ Task tool parameters:
     4. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
 ```
 
+### Prompt Assembly Notes
+
+- **Dependencies**: Use `task.dependencies`. For each dependency, include the commit hash from `.ralph/commits.json` if present.
+- **Prior Changes**: If `.ralph/results/task-XXX.md` exists for a dependency, include a 1-2 sentence summary.
+- **Research Notes**: If `task.context.research_refs` exists, include only the referenced items from `.ralph/research.json`.
+- **Reuse Notes**: If `task.reuse_notes` exists, include it as a bullet list.
+- **Fallbacks**: If any of the above data is missing, write "None" for that section.
+
 ---
 
-## Parallel Execution Rules
+## Sequential Execution Rules
 
-### Spawning Parallel Tasks
-
-To spawn multiple tasks in parallel, include multiple Task tool calls in a SINGLE message:
-
-```
-[In one message, call Task tool for task-001]
-[In same message, call Task tool for task-002]
-[In same message, call Task tool for task-003]
-```
-
-This spawns all three subagents simultaneously.
-
-### When to Parallelize
-
-Tasks can run in parallel if:
-1. They have the same `parallel_group` number
-2. All their dependencies are completed
-3. All are currently in `pending` status
+Tasks run one at a time in `task_order`. Do not spawn multiple Task tool calls in a single message.
 
 ### Wait Behavior
 
-After spawning parallel tasks:
-1. Wait for ALL spawned tasks to return
-2. Process results from each
-3. Update statuses for all before proceeding to next group
+For each task:
+1. Spawn a single subagent
+2. Wait for completion
+3. Process result, commit, and update state before starting the next task
 
 ---
 
@@ -181,14 +203,14 @@ If `phase` is already `executing` (interrupted run), resume as follows:
 
 For `in_progress` tasks:
 - Check if the task was actually completed by examining .ralph/results/
-- If result file exists and looks complete, mark as completed
+- If result file exists and commits.json contains a commit for the task, mark as completed
 - Otherwise, re-execute the task
 
 ---
 
 ## State Updates
 
-### Before Each Task Group
+### Before Each Task
 
 ```json
 // For each task about to start
@@ -271,21 +293,15 @@ Starting execution...
 Phase: executing
 Tasks: 5 total, 0 completed
 
-Group 1:
-  → Starting: task-001 - Create user model
-  → Starting: task-002 - Create product model
-  ✓ Completed: task-001 - Create user model
-  ✓ Completed: task-002 - Create product model
-
-Group 2:
-  → Starting: task-003 - Create user controller
-  ✓ Completed: task-003 - Create user controller
-
-Group 3:
-  → Starting: task-004 - Add validation logic
-  → Starting: task-005 - Create API endpoint
-  ✗ Failed: task-004 - Add validation logic
-    Error: Type mismatch in validation function
+→ Starting: task-001 - Create user model
+✓ Completed: task-001 - Create user model
+→ Starting: task-002 - Create product model
+✓ Completed: task-002 - Create product model
+→ Starting: task-003 - Create user controller
+✓ Completed: task-003 - Create user controller
+→ Starting: task-004 - Add validation logic
+✗ Failed: task-004 - Add validation logic
+  Error: Type mismatch in validation function
 
 ✗ EXECUTION STOPPED - Task Failed
 ...
@@ -298,7 +314,7 @@ Group 3:
 | Task ID and title | Implementation code |
 | Brief completion status | Subagent reasoning |
 | One-line error summary | Full stack traces (put in logs) |
-| Group progress | "I'm going to..." preambles |
+| Task progress | "I'm going to..." preambles |
 | Final summary | "Let me think..." explanations |
 
 ---
@@ -327,6 +343,8 @@ For each completed task, save to `.ralph/results/task-NNN.md`:
 
 ## Timestamp: [ISO 8601]
 
+## Commit: [commit hash or "n/a" if failed]
+
 ## Changes Made
 - [file1.ext]: [brief description of change]
 - [file2.ext]: [brief description of change]
@@ -346,8 +364,9 @@ For each completed task, save to `.ralph/results/task-NNN.md`:
 |-------------|---------------|
 | "Starting task X" | Console (brief) |
 | Code changes made | .ralph/results/ |
-| File diffs | .ralph/results/ |
+| File diffs | `git show <commit>` (commit hash in results/commits.json) |
 | Test output | .ralph/results/ |
+| Commit hash | .ralph/results/ and .ralph/commits.json |
 | Error stack traces | .ralph/logs/errors.log |
 | Completion message | Console (brief) |
 | Criteria verification | .ralph/results/ |
@@ -358,6 +377,52 @@ When spawning subagents, instruct them to:
 1. **Do NOT** print lengthy implementation details to the user
 2. **DO** return a structured result that will be saved to results/
 3. Focus output on confirmation that acceptance criteria were met
+
+---
+
+## Commit Policy
+
+After each successful task, create a git commit so every task maps to a single commit.
+
+### Commit Preconditions
+
+1. Working tree must be clean before starting a task
+2. After the task completes, only task-related changes should exist
+3. If unrelated changes are detected, stop and report an error
+
+### Commit Steps
+
+1. `git add -A`
+2. `git commit -m "ralph: [task-id] - [task title]"`
+3. Capture the commit hash
+4. Write or update `.ralph/commits.json` with the mapping
+5. Ensure working tree is clean after the commit
+
+### commits.json Format
+
+Save commit metadata to `.ralph/commits.json`:
+
+```json
+{
+  "base_commit": "abc1234",
+  "commits": [
+    {
+      "task_id": "task-001",
+      "title": "Create user model and migration",
+      "commit": "def5678",
+      "message": "ralph: task-001 - Create user model and migration",
+      "created_at": "2026-01-27T13:10:00Z"
+    }
+  ]
+}
+```
+
+### Failure Handling
+
+If the commit fails, treat it as a task failure:
+- Mark task as failed
+- Log the error to `.ralph/logs/errors.log`
+- Stop execution
 
 ---
 
@@ -377,8 +442,12 @@ Files modified:
   - [file1.ext]
   - [file2.ext]
   - [file3.ext]
+Commits:
+  - [task-id]: [commit hash]
 
 Detailed log: .ralph/logs/execution.log
+
+Next: Run /ralph-retro to review commits
 ```
 
 ### Example Summary Output
@@ -393,8 +462,13 @@ Files modified:
   - src/controllers/user.ts
   - src/routes/api.ts
   - tests/user.test.ts
+Commits:
+  - task-001: def5678
+  - task-002: a1b2c3d
 
 Detailed log: .ralph/logs/execution.log
+
+Next: Run /ralph-retro to review commits
 ```
 
 ### Collecting Summary Data
@@ -443,6 +517,7 @@ Title: [task title]
 Status: completed
 Started: [timestamp]
 Completed: [timestamp]
+Commit: [commit hash]
 Files Changed:
   - [file1]: [brief description]
   - [file2]: [brief description]
@@ -479,7 +554,11 @@ Update state.json when execution completes:
     "total_tasks": 5,
     "completed_tasks": 5,
     "failed_tasks": 0,
-    "files_modified": ["src/file1.ts", "src/file2.ts"]
+    "files_modified": ["src/file1.ts", "src/file2.ts"],
+    "commits": [
+      {"task_id": "task-001", "commit": "def5678"},
+      {"task_id": "task-002", "commit": "a1b2c3d"}
+    ]
   }
 }
 ```
@@ -490,6 +569,7 @@ Update state.json when execution completes:
 2. **Deduplicate files**: Same file may be modified by multiple tasks - list unique files only
 3. **Sort files**: Display files in alphabetical order for easier scanning
 4. **Handle empty list**: If no files modified, show "No files modified"
+5. **Aggregate commits**: Pull commit hashes from `.ralph/commits.json`
 
 ---
 
@@ -499,7 +579,6 @@ Update state.json when execution completes:
 
 This is non-negotiable. Do not:
 - Continue to next task
-- Continue to next parallel group
 - Attempt to "recover" or "work around" the failure
 - Queue up remaining tasks
 
@@ -614,6 +693,7 @@ If phase is 'failed': Fix the failed task, then run /ralph-start to resume.
 │   ├── task-001.json       # At least one task file
 │   ├── task-002.json
 │   └── ...
+├── commits.json            # Created during execution
 ├── results/                # Created during execution
 │   ├── task-001.md
 │   └── ...
@@ -628,7 +708,7 @@ If phase is 'failed': Fix the failed task, then run /ralph-start to resume.
 
 - This command is designed to run after /clear for fresh context
 - Each subagent starts with clean context and only task-specific information
-- Parallel execution significantly speeds up multi-task plans
+- Sequential execution ensures clean, reviewable commits per task
 - State is saved after each task for resumability
 - On failure, fix the issue and re-run /ralph-start to continue
 - Results in .ralph/results/ provide detailed execution logs

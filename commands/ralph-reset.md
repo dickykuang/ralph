@@ -38,9 +38,12 @@ The following will be deleted:
   - .ralph/research.json (if exists)
   - .ralph/decisions.json (if exists)
   - .ralph/prd.md (if exists)
+  - .ralph/commits.json (if exists)
   - .ralph/tasks/ (all task files)
   - .ralph/results/ (all result files)
   - .ralph/logs/ (all log files)
+  - .ralph/retro/ (all retro review data)
+  - .ralph/archive/ (all archived runs)
 
 This action cannot be undone.
 ```
@@ -113,6 +116,7 @@ Reset cancelled. State files preserved.
 ├── research.json (optional)
 ├── decisions.json (optional)
 ├── prd.md (optional)
+├── commits.json (optional)
 ├── tasks/
 │   ├── task-001.json
 │   ├── task-002.json
@@ -120,9 +124,11 @@ Reset cancelled. State files preserved.
 ├── results/
 │   ├── task-001.md
 │   └── ...
-└── logs/
-    ├── execution.log
-    └── errors.log
+├── retro/
+├── logs/
+│   ├── execution.log
+│   └── errors.log
+└── archive/
 ```
 
 All contents are removed when the `.ralph/` directory is deleted.
