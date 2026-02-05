@@ -39,15 +39,18 @@ Load:
 
 For each commit:
 
-1. **Summarize what changed**
-   - Use `git show --stat <commit>`
+1. **Show the diff**
+   - Use `git show <commit>` to display the full diff
+   - This shows the user exactly what code changed without needing to dig into files
+2. **Summarize what changed**
+   - Use `git show --stat <commit>` for a file-level summary
    - Reference the task description and acceptance criteria
    - Reference `.ralph/results/task-XXX.md`
-2. **Explain why it changed**
+3. **Explain why it changed**
    - Tie back to the task's goal and decisions made
-3. **Explain how it works**
+4. **Explain how it works**
    - Provide a brief explanation of the implementation approach
-4. **Ask for feedback**
+5. **Ask for feedback**
    - Use the AskUserQuestion tool (or equivalent in your runtime)
 
 Prompt format:
