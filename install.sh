@@ -50,27 +50,16 @@ case "$PLATFORM" in
         fi
 
         installed=0
-        skipped=0
+        updated=0
 
         for cmd in "${CLAUDE_COMMANDS[@]}"; do
             src="$CLAUDE_DIR/$cmd"
             dst="$TARGET_DIR/$cmd"
 
             if [ -f "$dst" ]; then
-                echo ""
-                echo "File already exists: $dst"
-                read -p "Overwrite? (y/N): " response < /dev/tty || response=""
-                case "$response" in
-                    [yY][eE][sS]|[yY])
-                        cp "$src" "$dst"
-                        echo "  Overwritten: $cmd"
-                        installed=$((installed + 1))
-                        ;;
-                    *)
-                        echo "  Skipped: $cmd"
-                        skipped=$((skipped + 1))
-                        ;;
-                esac
+                cp "$src" "$dst"
+                echo "Updated: $cmd"
+                updated=$((updated + 1))
             else
                 cp "$src" "$dst"
                 echo "Installed: $cmd"
@@ -83,7 +72,7 @@ case "$PLATFORM" in
         echo "Installation complete!"
         echo "  Target: Claude"
         echo "  Installed: $installed"
-        echo "  Skipped: $skipped"
+        echo "  Updated: $updated"
         echo ""
         echo "Ralph Claude commands are now available:"
         echo "  /ralph <task> - Start research and planning"
@@ -121,28 +110,17 @@ case "$PLATFORM" in
         fi
 
         installed=0
-        skipped=0
+        updated=0
 
         for skill in "${CODEX_SKILLS[@]}"; do
             src="$CODEX_DIR/$skill"
             dst="$TARGET_DIR/$skill"
 
             if [ -d "$dst" ]; then
-                echo ""
-                echo "Skill already exists: $dst"
-                read -p "Overwrite? (y/N): " response < /dev/tty || response=""
-                case "$response" in
-                    [yY][eE][sS]|[yY])
-                        rm -rf "$dst"
-                        cp -R "$src" "$dst"
-                        echo "  Overwritten: $skill"
-                        installed=$((installed + 1))
-                        ;;
-                    *)
-                        echo "  Skipped: $skill"
-                        skipped=$((skipped + 1))
-                        ;;
-                esac
+                rm -rf "$dst"
+                cp -R "$src" "$dst"
+                echo "Updated: $skill"
+                updated=$((updated + 1))
             else
                 cp -R "$src" "$dst"
                 echo "Installed: $skill"
@@ -155,7 +133,7 @@ case "$PLATFORM" in
         echo "Installation complete!"
         echo "  Target: Codex"
         echo "  Installed: $installed"
-        echo "  Skipped: $skipped"
+        echo "  Updated: $updated"
         echo ""
         echo "Ralph Codex skills are now available:"
         echo "  ralph"
