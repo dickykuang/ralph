@@ -24,7 +24,7 @@ Before executing, verify the following:
 2. **Read state.json**: Verify phase is `planning_complete` or `executing`
 3. **Verify git repository**: Must be inside a git repo
 4. **Verify clean working tree**: `git status --porcelain` must be empty
-5. **Verify plan artifacts**: `.ralph/prd.md` and `.ralph/decisions.json` should exist
+5. **Verify plan artifacts**: `.ralph/prd.md`, `.ralph/decisions.json`, and `.ralph/code_context.json` should exist
 6. **Read task files**: Load all tasks from `.ralph/tasks/`
 7. **Verify tasks exist**: At least one task file must be present
 8. **Reuse notes check**: Warn if a task appears to need reuse but has no `reuse_notes`
@@ -54,12 +54,13 @@ Do not block execution; this is advisory only.
 
 1. Read `.ralph/state.json`
 2. Read `.ralph/decisions.json`
-3. Read `.ralph/research.json` (if exists)
-4. Read `.ralph/commits.json` (if exists)
-5. Read `.ralph/results/` for prior task summaries (if exists)
-6. Read all task files from `.ralph/tasks/` directory
-7. Build execution plan from `task_order` in state.json (already sorted by dependencies, then priority)
-8. Identify current progress from `task_statuses`
+3. Read `.ralph/code_context.json` (required)
+4. Read `.ralph/research.json` (if exists)
+5. Read `.ralph/commits.json` (if exists)
+6. Read `.ralph/results/` for prior task summaries (if exists)
+7. Read all task files from `.ralph/tasks/` directory
+8. Build execution plan from `task_order` in state.json (already sorted by dependencies, then priority)
+9. Identify current progress from `task_statuses`
 
 ### Step 2: Update State to Executing
 
@@ -148,6 +149,10 @@ Worker session parameters:
     PRIOR CHANGES:
     [Brief summaries from .ralph/results/task-XXX.md for each dependency, if available]
 
+    CODE CONTEXT NOTES:
+    [If task.context.code_context_refs exists, include the referenced items from .ralph/code_context.json.
+    Otherwise include the most relevant entry_points, hot_paths, and data_flows from .ralph/code_context.json for this task.]
+
     RESEARCH NOTES:
     [If task.context.research_refs exists, include the referenced items from .ralph/research.json]
 
@@ -170,6 +175,7 @@ Worker session parameters:
     5. Run relevant tests if applicable
     6. Do NOT run `git add` or `git commit` (the orchestrator handles commits)
     7. Prefer existing helpers/utilities. Before creating a new function, search the codebase for an existing one. Only add a new function if no suitable helper exists, and keep it centralized (avoid duplicates).
+    8. Preserve documented data-flow invariants from CODE CONTEXT NOTES unless the task explicitly requires changing them.
 
     OUTPUT REQUIREMENTS - CRITICAL:
     - Do NOT output lengthy explanations or implementation details
@@ -188,6 +194,7 @@ Worker session parameters:
 
 - **Dependencies**: Use `task.dependencies`. For each dependency, include the commit hash from `.ralph/commits.json` if present.
 - **Prior Changes**: If `.ralph/results/task-XXX.md` exists for a dependency, include a 1-2 sentence summary.
+- **Code Context Notes**: If `task.context.code_context_refs` exists, include only the referenced items from `.ralph/code_context.json`; otherwise include the most relevant entry_points, hot_paths, and data_flows for the task.
 - **Research Notes**: If `task.context.research_refs` exists, include only the referenced items from `.ralph/research.json`.
 - **Reuse Notes**: If `task.reuse_notes` exists, include it as a bullet list.
 - **Fallbacks**: If any of the above data is missing, write "None" for that section.
