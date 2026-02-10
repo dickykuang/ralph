@@ -6,7 +6,7 @@ description: Orchestrate code context analysis, research, decisions, and plannin
 # Codex Runtime Mapping
 
 - This is a Codex skill adaptation of the original Claude command flow.
-- Replace Claude `Task` tool usage with fresh Codex worker sessions (for example, separate `codex exec` runs or equivalent isolated task execution in your runtime).
+- Replace Claude `Task` tool usage with fresh Codex worker sessions (subagents), for example separate `codex exec` runs or equivalent isolated task execution in your runtime.
 - Replace `AskUserQuestion` tool calls with direct user prompts in chat.
 - Replace slash-command assumptions with skill invocations by name.
 
@@ -757,6 +757,25 @@ Worker session parameters:
         {"title": "...", "url": "...", "relevance": "..."}
       ]
     }
+```
+
+### Codex CLI Subagent Pattern
+
+When running from Codex CLI, implement each worker session as a fresh, isolated `codex exec` process. The goal is to avoid context carryover from the parent conversation while keeping execution serialized.
+
+Guidelines:
+- Start a new `codex exec` invocation per worker session (no shared context).
+- Provide only the assembled prompt for that worker session.
+- Capture stdout as the worker session response.
+- Treat non-zero exit codes or missing required fields as failure.
+- Run one worker session at a time; do not parallelize.
+
+Example invocation pattern:
+
+```bash
+codex exec <<'PROMPT'
+[Assembled research prompt from the template above]
+PROMPT
 ```
 
 ### Output Format: research.json

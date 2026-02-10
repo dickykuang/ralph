@@ -6,7 +6,7 @@ description: Execute planned .ralph tasks sequentially with Codex worker session
 # Codex Runtime Mapping
 
 - This is a Codex skill adaptation of the original Claude command flow.
-- Replace Claude `Task` tool usage with fresh Codex worker sessions (for example, separate `codex exec` runs or equivalent isolated task execution in your runtime).
+- Replace Claude `Task` tool usage with fresh Codex worker sessions (subagents), for example separate `codex exec` runs or equivalent isolated task execution in your runtime.
 - Replace `AskUserQuestion` tool calls with direct user prompts in chat.
 - Replace slash-command assumptions with skill invocations by name.
 
@@ -190,6 +190,25 @@ Worker session parameters:
     4. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
 ```
 
+### Codex CLI Subagent Pattern
+
+When running from Codex CLI, implement each worker session as a fresh, isolated `codex exec` process. The goal is to avoid context carryover from the parent conversation while keeping execution serialized.
+
+Guidelines:
+- Start a new `codex exec` invocation per task (no shared context).
+- Provide only the assembled prompt for that task.
+- Capture stdout as the worker session response.
+- Treat non-zero exit codes or missing required fields as failure.
+- Run one worker session at a time; do not parallelize.
+
+Example invocation pattern:
+
+```bash
+codex exec <<'PROMPT'
+[Assembled task prompt from the template above]
+PROMPT
+```
+
 ### Prompt Assembly Notes
 
 - **Dependencies**: Use `task.dependencies`. For each dependency, include the commit hash from `.ralph/commits.json` if present.
@@ -208,7 +227,7 @@ Tasks run one at a time in `task_order`. Do not spawn multiple Codex worker sess
 ### Wait Behavior
 
 For each task:
-1. Spawn a single worker session
+1. Spawn a single fresh worker session (new `codex exec` invocation or equivalent)
 2. Wait for completion
 3. Process result, commit, and update state before starting the next task
 
