@@ -6,7 +6,7 @@ description: Reset Ralph state in .ralph with explicit confirmation and safe fai
 # Codex Runtime Mapping
 
 - This is a Codex skill adaptation of the original Claude command flow.
-- Replace Claude `Task` tool usage with fresh Codex worker sessions (for example, separate `codex exec` runs or equivalent isolated task execution in your runtime).
+- This reset flow is local and deterministic; execute it in the primary agent without spawning subagents.
 - Replace `AskUserQuestion` tool calls with direct user prompts in chat.
 - Replace slash-command assumptions with skill invocations by name.
 

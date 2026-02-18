@@ -6,22 +6,22 @@ description: Review Ralph execution commits, collect feedback, and generate foll
 # Codex Runtime Mapping
 
 - This is a Codex skill adaptation of the original Claude command flow.
-- Replace Claude `Task` tool usage with fresh Codex worker sessions (subagents), for example separate `codex exec` runs or equivalent isolated task execution in your runtime.
+- Replace Claude `Task` tool usage with Codex Subagent tools (`spawn_agent`, `wait`, `send_input`, `close_agent`) when delegation is useful.
 - Replace `AskUserQuestion` tool calls with direct user prompts in chat.
 - Replace slash-command assumptions with skill invocations by name.
 
 ---
 
-### Codex CLI Subagent Pattern (Optional)
+### Codex Subagent Lifecycle Pattern (Optional)
 
-If you choose to offload any review or summarization step to a worker session, run it as a fresh, isolated `codex exec` process to avoid context carryover.
+If you choose to offload review summarization, use the built-in subagent lifecycle directly.
 
 Guidelines:
-- Start a new `codex exec` invocation per worker session (no shared context).
-- Provide only the assembled prompt for that worker session.
-- Capture stdout as the worker session response.
-- Treat non-zero exit codes as failure.
-- Run one worker session at a time; do not parallelize.
+- Spawn one scoped subagent at a time for optional review helpers.
+- Wait with a long timeout and avoid rapid polling loops.
+- Use `send_input` for follow-up prompts when the first summary is incomplete.
+- Close every completed subagent with `close_agent`.
+- If subagent spawning fails, continue review in the primary agent.
 
 # Ralph Retro - Review Commits
 

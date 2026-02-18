@@ -1,12 +1,16 @@
 ---
 name: ralph-start
-description: Execute planned .ralph tasks sequentially with Codex worker sessions and per-task commits.
+description: Execute planned .ralph tasks sequentially with Codex subagents and per-task commits.
 ---
 
 # Codex Runtime Mapping
 
 - This is a Codex skill adaptation of the original Claude command flow.
-- Replace Claude `Task` tool usage with fresh Codex worker sessions (subagents), for example separate `codex exec` runs or equivalent isolated task execution in your runtime.
+- Replace Claude `Task` tool usage with Codex Subagent tools:
+  - `spawn_agent` to delegate one scoped task
+  - `wait` to gather completion (use long timeouts)
+  - `send_input` to refine/retry an active subagent
+  - `close_agent` after persisting task results
 - Replace `AskUserQuestion` tool calls with direct user prompts in chat.
 - Replace slash-command assumptions with skill invocations by name.
 
@@ -14,7 +18,7 @@ description: Execute planned .ralph tasks sequentially with Codex worker session
 
 # Ralph Start - Execute Tasks
 
-You are Ralph's execution engine. Your job is to execute the planned tasks from `.ralph/` directory using worker sessions for sequential execution with fresh context.
+You are Ralph's execution engine. Your job is to execute the planned tasks from `.ralph/` directory using subagents for sequential execution with fresh context.
 
 ## Pre-Execution Checks
 
@@ -81,8 +85,8 @@ For each task in task_order:
        - If dependencies are missing, stop with an error (planning bug)
 
     3. Mark task as "in_progress" in state.json
-    4. Spawn the worker session for the task
-    5. Wait for the worker session to complete
+    4. Spawn the subagent for the task
+    5. Wait for the subagent to complete
 
     6. If success:
        - Update task status to "completed" in state.json
@@ -110,15 +114,14 @@ When all tasks complete successfully:
 
 ---
 
-## Spawning Worker Sessions
+## Spawning Task Subagents
 
-For each task, spawn a worker session using a Codex worker session with this configuration:
+For each task, spawn exactly one implementation subagent with this configuration:
 
 ```
-Worker session parameters:
-  description: "[task-id]: [short title]"
-  execution_mode: "general-purpose"
-  prompt: |
+spawn_agent parameters:
+  agent_type: "worker"
+  message: |
     Execute this task from the Ralph plan:
 
     OVERALL CONTEXT:
@@ -176,6 +179,7 @@ Worker session parameters:
     6. Do NOT run `git add` or `git commit` (the orchestrator handles commits)
     7. Prefer existing helpers/utilities. Before creating a new function, search the codebase for an existing one. Only add a new function if no suitable helper exists, and keep it centralized (avoid duplicates).
     8. Preserve documented data-flow invariants from CODE CONTEXT NOTES unless the task explicitly requires changing them.
+    9. Do not spawn additional subagents for this task.
 
     OUTPUT REQUIREMENTS - CRITICAL:
     - Do NOT output lengthy explanations or implementation details
@@ -190,23 +194,26 @@ Worker session parameters:
     4. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
 ```
 
-### Codex CLI Subagent Pattern
+### Codex Subagent Lifecycle Pattern
 
-When running from Codex CLI, implement each worker session as a fresh, isolated `codex exec` process. The goal is to avoid context carryover from the parent conversation while keeping execution serialized.
+Use the built-in subagent lifecycle directly (not `codex exec` subprocesses).
 
 Guidelines:
-- Start a new `codex exec` invocation per task (no shared context).
-- Provide only the assembled prompt for that task.
-- Capture stdout as the worker session response.
-- Treat non-zero exit codes or missing required fields as failure.
-- Run one worker session at a time; do not parallelize.
+- Spawn one task subagent at a time; preserve strict `task_order`.
+- While a task subagent is running, coordinate only; do not perform overlapping implementation work in the parent agent.
+- Call `wait` with a long timeout (for example `timeout_ms: 300000`) to avoid busy polling.
+- If output is malformed or incomplete, call `send_input` for correction. Use `interrupt: true` only when immediate redirection is required.
+- Parse and validate result fields before marking task status.
+- Call `close_agent` after persisting `.ralph/results/task-NNN.md`.
+- If `spawn_agent` fails, mark the task failed and follow fail-fast handling.
 
-Example invocation pattern:
+Example lifecycle:
 
-```bash
-codex exec <<'PROMPT'
-[Assembled task prompt from the template above]
-PROMPT
+```text
+1. id = spawn_agent(agent_type="worker", message=<assembled task prompt>)
+2. result = wait(ids=[id], timeout_ms=300000)
+3. (optional) send_input(id, message=<correction request>)
+4. write .ralph/results/task-NNN.md, then close_agent(id)
 ```
 
 ### Prompt Assembly Notes
@@ -222,14 +229,14 @@ PROMPT
 
 ## Sequential Execution Rules
 
-Tasks run one at a time in `task_order`. Do not spawn multiple Codex worker session calls in a single message.
+Tasks run one at a time in `task_order`. Do not spawn multiple Codex subagent calls in a single message.
 
 ### Wait Behavior
 
 For each task:
-1. Spawn a single fresh worker session (new `codex exec` invocation or equivalent)
-2. Wait for completion
-3. Process result, commit, and update state before starting the next task
+1. Spawn a single task subagent with `spawn_agent`
+2. Wait for completion with `wait(ids=[id], timeout_ms=300000)`
+3. Process result, persist logs, call `close_agent`, commit, and update state before starting the next task
 
 ---
 
@@ -305,7 +312,7 @@ When executing, show ONLY brief status updates. Do NOT stream:
 - Implementation details
 - Code being written
 - File contents
-- Worker Session reasoning
+- Subagent reasoning traces
 - "Let me think about..." or similar phrases
 
 ### Required Messages
@@ -352,7 +359,7 @@ Tasks: 5 total, 0 completed
 | DO show | Do NOT show |
 |---------|-------------|
 | Task ID and title | Implementation code |
-| Brief completion status | Worker Session reasoning |
+| Brief completion status | Subagent reasoning traces |
 | One-line error summary | Full stack traces (put in logs) |
 | Task progress | "I'm going to..." preambles |
 | Final summary | "Let me think..." explanations |
@@ -411,9 +418,9 @@ For each completed task, save to `.ralph/results/task-NNN.md`:
 | Completion message | Console (brief) |
 | Criteria verification | .ralph/results/ |
 
-### Worker Session Instructions for Results
+### Subagent Instructions for Results
 
-When spawning worker sessions, instruct them to:
+When spawning subagents, instruct them to:
 1. **Do NOT** print lengthy implementation details to the user
 2. **DO** return a structured result that will be saved to results/
 3. Focus output on confirmation that acceptance criteria were met
@@ -632,10 +639,10 @@ This is non-negotiable. Do not:
 ### Failure Detection
 
 A task is considered "failed" if:
-- The worker session explicitly reports failure
-- The worker session throws an error
-- The worker session reports acceptance criteria not met
-- The Codex worker session returns an error
+- The subagent explicitly reports failure
+- The subagent throws an error
+- The subagent reports acceptance criteria not met
+- The Codex subagent returns an error
 
 ---
 
@@ -643,7 +650,7 @@ A task is considered "failed" if:
 
 ### Task Failure
 
-If a worker session reports failure or throws an error:
+If a subagent reports failure or throws an error:
 
 1. **STOP immediately** - do not spawn any more tasks
 2. **Mark task as failed** in state.json
@@ -661,7 +668,7 @@ If a worker session reports failure or throws an error:
    [brief error message - first line or summary]
 
    Full Error Details:
-   [complete error message from worker session]
+   [complete error message from subagent]
 
    Files Involved:
    [list of files_to_modify from task]
@@ -747,7 +754,7 @@ If phase is 'failed': Fix the failed task, then run ralph-start skill to resume.
 ## Notes
 
 - This command is designed to run after start a new Codex session for fresh context
-- Each worker session starts with clean context and only task-specific information
+- Each subagent starts with clean context and only task-specific information
 - Sequential execution ensures clean, reviewable commits per task
 - State is saved after each task for resumability
 - On failure, fix the issue and re-run ralph-start skill to continue

@@ -6,7 +6,12 @@ description: Orchestrate code context analysis, research, decisions, and plannin
 # Codex Runtime Mapping
 
 - This is a Codex skill adaptation of the original Claude command flow.
-- Replace Claude `Task` tool usage with fresh Codex worker sessions (subagents), for example separate `codex exec` runs or equivalent isolated task execution in your runtime.
+- Replace Claude `Task` tool usage with Codex Subagent tools:
+  - `spawn_agent` to delegate a well-scoped task
+  - `wait` to gather completion (prefer long timeouts to avoid busy polling)
+  - `send_input` to refine or redirect a running subagent
+  - `close_agent` after persisting output
+- If `spawn_agent` is unavailable or fails, continue in the primary agent and note the fallback in `.ralph/research.json`.
 - Replace `AskUserQuestion` tool calls with direct user prompts in chat.
 - Replace slash-command assumptions with skill invocations by name.
 
@@ -58,7 +63,7 @@ Run this phase for both simple and complex tasks:
 Only run this phase if complexity is "complex":
 
 1. **Update state.json**: Set `phase` to "research"
-2. **Spawn research worker session** using a Codex worker session with the prompt template from "Research Phase" section
+2. **Spawn research subagent** using a Codex subagent with the prompt template from "Research Phase" section
 3. **Save results** to `.ralph/research.json`
 4. **Handle failures gracefully**: If research fails, create empty research.json and proceed
 
@@ -108,7 +113,7 @@ After planning is complete:
 2. **STOP HERE** - Do not proceed to execution. The user must:
    - Review the generated plan
    - Run `start a new Codex session` to get fresh context
-   - Run `ralph-start` skill to execute with worker sessions
+   - Run `ralph-start` skill to execute with subagents
 
 ---
 
@@ -329,7 +334,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | `decisions` | Surfacing and resolving critical decisions with user |
 | `planning` | Generating PRD and discrete task files |
 | `planning_complete` | Plan ready for user review (run ralph-start skill after start a new Codex session) |
-| `executing` | Tasks are being executed via worker sessions |
+| `executing` | Tasks are being executed via subagents |
 | `completed` | All tasks finished successfully |
 | `failed` | Execution stopped due to a task failure |
 
@@ -338,7 +343,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | Status | Description |
 |--------|-------------|
 | `pending` | Task not yet started |
-| `in_progress` | Task currently being executed by a worker session |
+| `in_progress` | Task currently being executed by a subagent |
 | `completed` | Task finished successfully |
 | `failed` | Task execution failed |
 
@@ -405,7 +410,7 @@ ralph skill invoked
     ↓
 ralph-start skill invoked
     ↓
-[executing] → (worker sessions execute tasks)
+[executing] → (subagents execute tasks)
     ↓
 [completed] or [failed]
 ```
@@ -699,9 +704,9 @@ Complex task detected
     ↓
 [research] phase begins
     ↓
-Spawn research worker session with Codex worker session
+Spawn research subagent with `spawn_agent`
     ↓
-Worker Session performs web searches
+Subagent performs web searches
     ↓
 Results saved to .ralph/research.json
     ↓
@@ -710,7 +715,7 @@ State updated to [decisions] phase
 
 ### Research Goals
 
-The research worker session gathers information in these categories:
+The research subagent gathers information in these categories:
 
 | Category | Description | Examples |
 |----------|-------------|----------|
@@ -719,17 +724,16 @@ The research worker session gathers information in these categories:
 | **Common Pitfalls** | Known issues and anti-patterns | Race conditions, security vulnerabilities, performance traps |
 | **References** | Authoritative sources for further reading | Official docs, trusted tutorials, GitHub repos |
 
-### Spawning the Research Worker Session
+### Spawning the Research Subagent
 
-Use the Codex worker session with `execution_mode: "general-purpose"` to spawn a research agent. The agent has access to WebSearch for gathering information.
+Use `spawn_agent` for a dedicated research subagent. Keep scope narrow and require structured JSON output.
 
-**Task invocation:**
+**spawn_agent invocation:**
 
 ```
-Worker session parameters:
-  description: "Research [brief topic description]"
-  execution_mode: "general-purpose"
-  prompt: |
+spawn_agent parameters:
+  agent_type: "default"
+  message: |
     Research the following task to gather technical information:
 
     TASK: [user's original request]
@@ -741,6 +745,7 @@ Worker session parameters:
     4. **References**: Collect links to authoritative sources
 
     Use WebSearch to find current, authoritative information.
+    Do not spawn additional subagents for this task.
 
     Return your findings as JSON in this exact format:
     {
@@ -759,23 +764,26 @@ Worker session parameters:
     }
 ```
 
-### Codex CLI Subagent Pattern
+### Codex Subagent Lifecycle Pattern
 
-When running from Codex CLI, implement each worker session as a fresh, isolated `codex exec` process. The goal is to avoid context carryover from the parent conversation while keeping execution serialized.
+Use the built-in subagent lifecycle directly (not `codex exec` subprocesses).
 
 Guidelines:
-- Start a new `codex exec` invocation per worker session (no shared context).
-- Provide only the assembled prompt for that worker session.
-- Capture stdout as the worker session response.
-- Treat non-zero exit codes or missing required fields as failure.
-- Run one worker session at a time; do not parallelize.
+- Spawn one research subagent per research phase and keep it scoped to research only.
+- While the subagent is running, coordinate only; do not perform overlapping research work in the parent agent.
+- Call `wait` with a long timeout (for example `timeout_ms: 300000`) to avoid busy polling.
+- If output is incomplete or malformed, call `send_input` to request corrections. Use `interrupt: true` only when you must redirect immediately.
+- Always call `close_agent` after saving results.
+- If `spawn_agent` fails, proceed in the primary agent and record fallback behavior in `research.json`.
 
-Example invocation pattern:
+Example lifecycle:
 
-```bash
-codex exec <<'PROMPT'
-[Assembled research prompt from the template above]
-PROMPT
+```text
+1. id = spawn_agent(agent_type="default", message=<research prompt>)
+2. result = wait(ids=[id], timeout_ms=300000)
+3. (optional) send_input(id, message=<clarification request>) if schema is not satisfied
+4. parse result as JSON and write .ralph/research.json
+5. close_agent(id)
 ```
 
 ### Output Format: research.json
@@ -901,10 +909,12 @@ When implementing the `ralph` skill command, execute research as follows:
 1. **Check complexity**: Only run research for complex tasks
 2. **Verify prerequisites**: Ensure `.ralph/code_context.json` exists from the mandatory code context phase
 3. **Update state**: Set phase to `research` before starting
-4. **Spawn worker session**: Use a Codex worker session with the prompt template above
-5. **Parse results**: Extract JSON from worker session response
-6. **Save research**: Write results to `.ralph/research.json`
-7. **Update state**: Transition phase to `decisions`
+4. **Spawn subagent**: Use `spawn_agent` with the prompt template above
+5. **Wait for completion**: Use `wait` with a long timeout
+6. **Repair if needed**: Use `send_input` if output does not match the required JSON format
+7. **Parse and save**: Extract JSON and write results to `.ralph/research.json`
+8. **Close subagent**: Call `close_agent`
+9. **Update state**: Transition phase to `decisions`
 
 **Example flow in ralph skill command:**
 
@@ -915,24 +925,27 @@ When implementing the `ralph` skill command, execute research as follows:
    - phase: "research"
    - updated_at: <current timestamp>
 
-2. Call Codex worker session:
-   - description: "Research [topic]"
-   - execution_mode: "general-purpose"
-   - prompt: [research prompt with user's task]
+2. Call `spawn_agent`:
+   - agent_type: "default"
+   - message: [research prompt with user's task]
 
-3. When worker session returns:
+3. Call `wait` on the returned agent id:
+   - timeout_ms: 300000
+
+4. When subagent returns:
    - Parse JSON from response
    - Add metadata (task, researched_at)
    - Write to .ralph/research.json
+   - Call `close_agent` for the completed id
 
-4. Update state.json:
+5. Update state.json:
    - phase: "decisions"
    - updated_at: <current timestamp>
 ```
 
 ### Handling Research Failures
 
-If the research worker session fails or returns invalid JSON:
+If the research subagent fails or returns invalid JSON:
 
 1. Log the error to `.ralph/logs/errors.log`
 2. Create a minimal research.json with empty arrays
@@ -943,7 +956,7 @@ If the research worker session fails or returns invalid JSON:
 {
   "task": "...",
   "researched_at": "...",
-  "error": "Research worker session failed: [error details]",
+  "error": "Research subagent failed: [error details]",
   "specs": [],
   "best_practices": [],
   "pitfalls": [],
@@ -954,7 +967,7 @@ If the research worker session fails or returns invalid JSON:
 ### Notes
 
 - Research adds latency but prevents costly mistakes in planning
-- The worker session runs autonomously and returns when complete
+- The subagent runs autonomously and returns when complete
 - Results inform the decisions phase (what needs user input)
 - For security-sensitive tasks, research is especially valuable
 - Research is cached; re-running ralph skill on same task reuses existing research
@@ -1237,7 +1250,7 @@ For simple tasks or tasks where research/code-context surfaced no ambiguities:
 
 ## Planning Phase
 
-After decisions are resolved, Ralph generates a comprehensive plan with discrete, executable tasks. This phase produces a PRD document and individual task files that enable autonomous execution via worker sessions.
+After decisions are resolved, Ralph generates a comprehensive plan with discrete, executable tasks. This phase produces a PRD document and individual task files that enable autonomous execution via subagents.
 
 ### When Planning Runs
 
@@ -1472,7 +1485,7 @@ Next task: task-002 (tie broken by ID)
 
 ### Task Sizing Guidelines
 
-Each task should be sized for completion in a single worker session session. This ensures:
+Each task should be sized for completion in a single subagent session. This ensures:
 - Fresh context for each task (after start a new Codex session)
 - Manageable scope
 - Clear success/failure determination
@@ -1618,7 +1631,7 @@ Before finalizing, validate all task files:
 - Planning produces deterministic output from the same inputs
 - Tasks are stored as separate files for easy inspection and modification
 - Users can manually edit task files before running ralph-start skill
-- The PRD is for human consumption; tasks are for worker session execution
+- The PRD is for human consumption; tasks are for subagent execution
 - Re-running ralph skill regenerates the plan (use with caution after edits)
 - Simple tasks may have only 1-3 task files; complex tasks may have 10+
 - Task IDs are sequential but execution order follows priority and dependencies
