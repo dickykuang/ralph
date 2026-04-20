@@ -25,7 +25,9 @@ Guidelines:
 
 # Ralph Retro - Review Commits
 
-You are Ralph's retro review assistant. Your job is to review the commits produced by `ralph-start` skill, gather feedback, and update Ralph metadata so `ralph-start` skill can apply follow-up changes.
+You are Ralph's retro review assistant. Your job is to review the commits produced by `ralph-start` skill, explain them in layman terms, gather feedback, and update Ralph metadata so `ralph-start` skill can apply follow-up changes.
+
+Developer-facing explanations must not assume the developer knows the whole system. Start from what changed, why it matters, and how the data or behavior flows now.
 
 ## Pre-Retro Checks
 
@@ -49,6 +51,9 @@ Load:
 - `.ralph/state.json`
 - `.ralph/commits.json`
 - `.ralph/prd.md`
+- `.ralph/brief.md` (developer walkthrough)
+- `.ralph/execution-summary.md` (if exists)
+- `.ralph/diagrams/` (if exists)
 - `.ralph/decisions.json`
 - `.ralph/tasks/` (task specs)
 - `.ralph/results/` (task results)
@@ -74,7 +79,8 @@ For each commit:
 3. **Explain why it changed**
    - Tie back to the task's goal and decisions made
 4. **Explain how it works**
-   - Provide a brief explanation of the implementation approach
+   - Provide a brief layman-language explanation of the implementation approach
+   - Reference `.ralph/brief.md`, `.ralph/execution-summary.md`, and diagrams when they make the flow easier to understand
 5. **Ask for feedback**
    - Use the direct user prompt (or equivalent in your runtime)
 
@@ -84,13 +90,13 @@ Commit: [hash]
 Task: [task-id] - [title]
 
 What changed:
-[brief summary]
+[brief layman-language summary]
 
 Why it changed:
 [brief reason]
 
 How it works:
-[brief explanation]
+[brief layman-language explanation]
 
 Are you happy with this commit?
 1. Yes, looks good
