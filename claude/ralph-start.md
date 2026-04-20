@@ -11,11 +11,21 @@ Before executing, verify the following:
 3. **Verify git repository**: Must be inside a git repo
 4. **Verify clean working tree**: `git status --porcelain` must be empty
 5. **Verify plan artifacts**: `.ralph/prd.md`, `.ralph/decisions.json`, and `.ralph/code_context.json` should exist
-6. **Read task files**: Load all tasks from `.ralph/tasks/`
-7. **Verify tasks exist**: At least one task file must be present
-8. **Reuse notes check**: Warn if a task appears to need reuse but has no `reuse_notes`
+6. **Verify developer walkthrough artifacts**: `.ralph/brief.md`, `.ralph/acknowledgement.json`, and `.ralph/diagrams/` should exist
+7. **Verify developer acknowledgement**: `.ralph/acknowledgement.json` must contain `acknowledged_by_user: true`; `state.json` should contain `developer_acknowledged: true`
+8. **Read task files**: Load all tasks from `.ralph/tasks/`
+9. **Verify tasks exist**: At least one task file must be present
+10. **Reuse notes check**: Warn if a task appears to need reuse but has no `reuse_notes`
 
 If any check fails, report the error and stop.
+
+If acknowledgement is missing, stop with:
+```
+Execution blocked.
+
+The developer has not acknowledged the Ralph planning walkthrough yet.
+Run /ralph again, review the plain-English walkthrough and diagrams, then reply `ack`.
+```
 
 ---
 
@@ -42,11 +52,14 @@ Do not block execution; this is advisory only.
 2. Read `.ralph/decisions.json`
 3. Read `.ralph/code_context.json` (required)
 4. Read `.ralph/research.json` (if exists)
-5. Read `.ralph/commits.json` (if exists)
-6. Read `.ralph/results/` for prior task summaries (if exists)
-7. Read all task files from `.ralph/tasks/` directory
-8. Build execution plan from `task_order` in state.json (already sorted by dependencies, then priority)
-9. Identify current progress from `task_statuses`
+5. Read `.ralph/brief.md` (required)
+6. Read `.ralph/acknowledgement.json` (required)
+7. Read `.ralph/diagrams/` (required)
+8. Read `.ralph/commits.json` (if exists)
+9. Read `.ralph/results/` for prior task summaries (if exists)
+10. Read all task files from `.ralph/tasks/` directory
+11. Build execution plan from `task_order` in state.json (already sorted by dependencies, then priority)
+12. Identify current progress from `task_statuses`
 
 ### Step 2: Update State to Executing
 
@@ -91,8 +104,9 @@ For each task in task_order:
 When all tasks complete successfully:
 1. Update state.json phase to `completed`
 2. Write detailed execution log to `.ralph/logs/execution.log`
-3. Display execution summary to user (see Execution Summary section below)
-4. Suggest `/ralph-retro` to review commits
+3. Write plain-English execution summary to `.ralph/execution-summary.md`
+4. Display execution summary to user (see Execution Summary section below)
+5. Suggest `/ralph-retro` only for deeper walkthrough, questions, or follow-up changes
 
 ---
 
@@ -115,6 +129,8 @@ Task tool parameters:
     project requirements, architecture decisions, and how this task fits into
     the overall plan.
 
+    Also read `.ralph/brief.md` and `.ralph/diagrams/`. These are the developer-facing explanation of the system slice. Preserve the explained data flow unless this task explicitly changes it.
+
     ---
 
     TASK ID: [task.id]
@@ -123,8 +139,20 @@ Task tool parameters:
     DESCRIPTION:
     [task.description]
 
+    WHY THIS TASK EXISTS:
+    [task.why_this_task_exists]
+
+    PLAIN-ENGLISH TASK SUMMARY:
+    [task.plain_english_summary]
+
+    EXPECTED USER-VISIBLE CHANGE:
+    [task.expected_user_visible_change]
+
     ACCEPTANCE CRITERIA:
     [Each criterion as a bullet point]
+
+    VERIFICATION PLAN:
+    [Each verification step as a bullet point]
 
     FILES TO MODIFY:
     [Each file path as a bullet point]
@@ -151,10 +179,16 @@ Task tool parameters:
     DECISIONS MADE:
     [Relevant decisions from decisions.json, if task.context.decisions_refs exists]
 
+    DEVELOPER BRIEF:
+    [Relevant excerpt from .ralph/brief.md in plain terms]
+
+    DIAGRAM NOTES:
+    [Relevant current/proposed data-flow notes from .ralph/diagrams/]
+
     ---
 
     Instructions:
-    1. Read `.ralph/prd.md` to understand the overall project context
+    1. Read `.ralph/prd.md`, `.ralph/brief.md`, and `.ralph/diagrams/` to understand the overall project context
     2. Implement the task following the description
     3. Ensure ALL acceptance criteria are met
     4. Only modify the files listed (or closely related files if necessary)
@@ -164,16 +198,20 @@ Task tool parameters:
     8. Preserve documented data-flow invariants from CODE CONTEXT NOTES unless the task explicitly requires changing them.
 
     OUTPUT REQUIREMENTS - CRITICAL:
-    - Do NOT output lengthy explanations or implementation details
+    - Explain results in plain, layman terms for the developer
+    - Do NOT output lengthy implementation details or reasoning traces
     - Do NOT use phrases like "Let me think..." or "I'm going to..."
     - Focus your response on RESULTS, not process
     - Return a brief, structured result confirming what was done
 
     When complete, return ONLY:
     1. Status: success or failure
-    2. Brief summary (1-2 sentences max)
-    3. List of files modified
-    4. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
+    2. What changed (1-2 plain-language sentences)
+    3. Why it changed (tie back to the task and original request)
+    4. How it works (short layman explanation)
+    5. List of files modified with plain-language purpose
+    6. Verification performed
+    7. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
 ```
 
 ### Prompt Assembly Notes
@@ -183,6 +221,9 @@ Task tool parameters:
 - **Code Context Notes**: If `task.context.code_context_refs` exists, include only the referenced items from `.ralph/code_context.json`; otherwise include the most relevant entry_points, hot_paths, and data_flows for the task.
 - **Research Notes**: If `task.context.research_refs` exists, include only the referenced items from `.ralph/research.json`.
 - **Reuse Notes**: If `task.reuse_notes` exists, include it as a bullet list.
+- **Developer Brief**: Include the relevant `.ralph/brief.md` sections for this task, especially current behavior, proposed behavior, terms, risks, and files that matter.
+- **Diagram Notes**: Include relevant Mermaid diagram snippets or node summaries from `.ralph/diagrams/`.
+- **Developer Task Fields**: Include `why_this_task_exists`, `plain_english_summary`, `expected_user_visible_change`, and `verification_plan`. If an older task file does not have these fields, synthesize short layman-language replacements before prompting the subagent.
 - **Fallbacks**: If any of the above data is missing, write "None" for that section.
 
 ---
@@ -352,9 +393,24 @@ For each completed task, save to `.ralph/results/task-NNN.md`:
 
 ## Commit: [commit hash or "n/a" if failed]
 
+## What Changed
+[Plain-language explanation of what changed]
+
+## Why It Changed
+[Plain-language explanation tied to the original request and task purpose]
+
+## How It Works
+[Short layman explanation of the behavior or data flow]
+
 ## Changes Made
 - [file1.ext]: [brief description of change]
 - [file2.ext]: [brief description of change]
+
+## User-Visible Result
+[What a user/developer should notice, or "No direct visible change"]
+
+## Verification
+- [test/check]: [result]
 
 ## Acceptance Criteria Results
 - [x] Criterion 1 - Met because...
@@ -371,6 +427,7 @@ For each completed task, save to `.ralph/results/task-NNN.md`:
 |-------------|---------------|
 | "Starting task X" | Console (brief) |
 | Code changes made | .ralph/results/ |
+| Plain-English what/why/how explanation | .ralph/results/ and .ralph/execution-summary.md |
 | File diffs | `git show <commit>` (commit hash in results/commits.json) |
 | Test output | .ralph/results/ |
 | Commit hash | .ralph/results/ and .ralph/commits.json |
@@ -383,7 +440,8 @@ For each completed task, save to `.ralph/results/task-NNN.md`:
 When spawning subagents, instruct them to:
 1. **Do NOT** print lengthy implementation details to the user
 2. **DO** return a structured result that will be saved to results/
-3. Focus output on confirmation that acceptance criteria were met
+3. **DO** explain what changed, why it changed, and how it works in layman terms
+4. Focus output on confirmation that acceptance criteria were met
 
 ---
 
@@ -435,7 +493,7 @@ If the commit fails, treat it as a task failure:
 
 ## Execution Summary
 
-**After all tasks complete successfully, display a summary and write detailed logs.**
+**After all tasks complete successfully, display a summary and write detailed logs. Also write `.ralph/execution-summary.md` in layman terms so the developer can understand what got built without reading every commit.**
 
 ### Summary Display Format
 
@@ -445,16 +503,28 @@ When execution completes, show this summary to the user:
 ✓ EXECUTION COMPLETE
 
 Tasks: [completed] completed, [failed] failed
+
+Built:
+  [Plain-language summary of the completed work]
+
+How it works:
+  [Plain-language explanation of the final data flow or behavior]
+
 Files modified:
-  - [file1.ext]
-  - [file2.ext]
-  - [file3.ext]
+  - [file1.ext]: [why it changed]
+  - [file2.ext]: [why it changed]
+  - [file3.ext]: [why it changed]
+
+Verified:
+  - [test/check result]
+
 Commits:
   - [task-id]: [commit hash]
 
+Developer summary: .ralph/execution-summary.md
 Detailed log: .ralph/logs/execution.log
 
-Next: Run /ralph-retro to review commits
+Next: Run /ralph-retro only if you want a deeper walkthrough, have questions, or want follow-up changes.
 ```
 
 ### Example Summary Output
@@ -463,19 +533,30 @@ Next: Run /ralph-retro to review commits
 ✓ EXECUTION COMPLETE
 
 Tasks: 5 completed, 0 failed
+
+Built:
+  User records, API routes, and validation for account management.
+
+How it works:
+  Requests enter through the route, the controller validates input, the account layer saves user data, and tests cover the expected success and failure paths.
+
 Files modified:
-  - src/models/user.ts
-  - src/models/product.ts
-  - src/controllers/user.ts
-  - src/routes/api.ts
-  - tests/user.test.ts
+  - src/models/user.ts: stores user account data
+  - src/controllers/user.ts: handles user API requests
+  - src/routes/api.ts: connects URLs to the controller
+  - tests/user.test.ts: verifies the user flow
+
+Verified:
+  - npm test passed
+
 Commits:
   - task-001: def5678
   - task-002: a1b2c3d
 
+Developer summary: .ralph/execution-summary.md
 Detailed log: .ralph/logs/execution.log
 
-Next: Run /ralph-retro to review commits
+Next: Run /ralph-retro only if you want a deeper walkthrough, have questions, or want follow-up changes.
 ```
 
 ### Collecting Summary Data
@@ -485,6 +566,37 @@ During execution, track:
 1. **Task counts**: Increment completed/failed counters as tasks finish
 2. **Files modified**: Aggregate from each task's result (files_modified list)
 3. **Timestamps**: Track start and end time for duration calculation
+4. **Plain-English explanations**: Aggregate each task's what/why/how sections
+5. **Verification**: Aggregate tests/checks from task results
+
+### execution-summary.md Format
+
+Write `.ralph/execution-summary.md`:
+
+```markdown
+# Ralph Execution Summary
+
+## What Got Built
+[Plain-language summary]
+
+## How It Works
+[Plain-language explanation of the final flow]
+
+## What Changed By Task
+- `[task-id]`: [what changed, why, and user-visible result]
+
+## Files Changed
+- `[path]`: [why it changed]
+
+## Verification
+- [test/check]: [result]
+
+## Commits
+- `[task-id]`: [commit hash]
+
+## What To Review
+- [specific review guidance]
+```
 
 ### Execution Log Format
 
@@ -528,6 +640,10 @@ Commit: [commit hash]
 Files Changed:
   - [file1]: [brief description]
   - [file2]: [brief description]
+Plain-English Explanation:
+  What changed: [short summary]
+  Why it changed: [short summary]
+  How it works: [short summary]
 Acceptance Criteria:
   ✓ Criterion 1
   ✓ Criterion 2
@@ -577,6 +693,7 @@ Update state.json when execution completes:
 3. **Sort files**: Display files in alphabetical order for easier scanning
 4. **Handle empty list**: If no files modified, show "No files modified"
 5. **Aggregate commits**: Pull commit hashes from `.ralph/commits.json`
+6. **Write developer summary**: Create `.ralph/execution-summary.md` from task results using layman terms
 
 ---
 
@@ -696,6 +813,13 @@ If phase is 'failed': Fix the failed task, then run /ralph-start to resume.
 ```
 .ralph/
 ├── state.json              # Must exist with phase: planning_complete
+├── brief.md                # Developer walkthrough from planning
+├── acknowledgement.json    # Must confirm acknowledged_by_user: true
+├── diagrams/               # Current/proposed data flow and task graph
+│   ├── current-data-flow.md
+│   ├── proposed-data-flow.md
+│   └── task-dependency-graph.md
+├── prd.md                  # Final plan
 ├── tasks/
 │   ├── task-001.json       # At least one task file
 │   ├── task-002.json
@@ -704,6 +828,7 @@ If phase is 'failed': Fix the failed task, then run /ralph-start to resume.
 ├── results/                # Created during execution
 │   ├── task-001.md
 │   └── ...
+├── execution-summary.md    # Created after successful execution
 └── logs/                   # Created during execution
     ├── execution.log
     └── errors.log
@@ -719,3 +844,4 @@ If phase is 'failed': Fix the failed task, then run /ralph-start to resume.
 - State is saved after each task for resumability
 - On failure, fix the issue and re-run /ralph-start to continue
 - Results in .ralph/results/ provide detailed execution logs
+- `.ralph/execution-summary.md` explains what got built and how it works in layman terms

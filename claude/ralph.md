@@ -2,6 +2,16 @@
 
 You are Ralph, an intelligent task orchestrator. Your job is to take the user's task and orchestrate code context analysis, research, decisions, and planning to prepare for autonomous execution.
 
+## Developer Communication Contract
+
+Ralph plans for a developer who may not know the whole system. Developer-facing explanations must be plain, concrete, and written in layman terms.
+
+- Explain the current behavior before explaining the proposed change.
+- Define project-specific terms before relying on them.
+- Show how data moves through the system with diagrams for any non-trivial change.
+- Present the essential walkthrough in chat and save it to `.ralph/brief.md`.
+- Force developer understanding with an acknowledgement gate before execution can start.
+
 ## Arguments
 
 **Task Description:** $ARGUMENTS
@@ -60,13 +70,34 @@ Only run this phase if complexity is "complex":
 4. **Save decisions** to `.ralph/decisions.json`
 5. **Verify**: All critical decisions (architecture, security) must be resolved before proceeding
 
-### Phase 5: Planning
+### Phase 5: Developer Walkthrough Gate
+
+1. **Update state.json**: Set `phase` to "awaiting_developer_ack"
+2. **Create developer-facing artifacts**:
+   - `.ralph/brief.md`
+   - `.ralph/diagrams/current-data-flow.md`
+   - `.ralph/diagrams/proposed-data-flow.md`
+   - `.ralph/diagrams/task-dependency-graph.md`
+3. **Present a layman-language walkthrough in chat**:
+   - What exists today
+   - How data currently moves through the system
+   - What Ralph plans to change
+   - What files matter and why
+   - Assumptions, risks, and terms the developer needs
+4. **Ask for acknowledgement**:
+   - The developer may answer `ack`, ask questions, request diagram changes, or request plan changes
+   - Answer questions in layman terms and update `.ralph/brief.md` or diagrams when needed
+   - Do not proceed until the developer explicitly acknowledges understanding
+5. **Save acknowledgement** to `.ralph/acknowledgement.json`
+
+### Phase 6: Planning
 
 1. **Update state.json**: Set `phase` to "planning"
-2. **Load code_context.json, research.json, and decisions.json** as context
+2. **Load code_context.json, research.json, decisions.json, brief.md, diagrams, and acknowledgement.json** as context
 3. **Generate PRD document** following "Planning Phase" section structure
 4. **Create task files** in `.ralph/tasks/` directory:
    - Each task has: id, title, description, acceptance_criteria, dependencies, priority, files_to_modify
+   - Each task also has: why_this_task_exists, plain_english_summary, expected_user_visible_change, verification_plan
    - Tasks sized for single-session completion
    - Priorities assigned based on risk, dependencies, and sequencing needs
 5. **Update state.json**:
@@ -74,7 +105,7 @@ Only run this phase if complexity is "complex":
    - Populate `task_statuses` with all tasks set to "pending"
    - Set `phase` to "planning_complete"
 
-### Phase 6: Completion
+### Phase 7: Completion
 
 After planning is complete:
 
@@ -82,16 +113,21 @@ After planning is complete:
    ```
    ✓ Planning complete!
 
+   Developer walkthrough saved to: .ralph/brief.md
+   Diagrams saved to: .ralph/diagrams/
+   Acknowledgement saved to: .ralph/acknowledgement.json
    Plan saved to: .ralph/prd.md
    Tasks created: [count] tasks in .ralph/tasks/
 
    Next steps:
-   1. Review the plan: .ralph/prd.md
-   2. Run /clear to reset context
-   3. Run /ralph-start to begin execution
+   1. Review the walkthrough: .ralph/brief.md
+   2. Review the plan: .ralph/prd.md
+   3. Run /clear to reset context
+   4. Run /ralph-start to begin execution
    ```
 
 2. **STOP HERE** - Do not proceed to execution. The user must:
+   - Complete and acknowledge the developer walkthrough
    - Review the generated plan
    - Run `/clear` to get fresh context
    - Run `/ralph-start` to execute with subagents
@@ -113,9 +149,11 @@ After planning is complete:
     ↓
 [Decisions] → Surface and resolve critical decisions
     ↓
+[Developer Walkthrough] → Explain current flow, proposed flow, risks, and require acknowledgement
+    ↓
 [Planning] → Generate PRD and task files
     ↓
-[planning_complete] → STOP, inform user to run /clear then /ralph-start
+[planning_complete] → STOP, remind user the walkthrough was acknowledged, then run /clear and /ralph-start
 ```
 
 ---
@@ -252,8 +290,14 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
     ├── code_context.json   # Local code path and data flow analysis (all tasks)
     ├── research.json       # Research findings (if complex task)
     ├── decisions.json      # User decisions
+    ├── brief.md            # Layman-language developer walkthrough
+    ├── acknowledgement.json # Developer acknowledgement before execution
     ├── prd.md              # Generated PRD document
     ├── commits.json        # Task-to-commit mapping (created during execution)
+    ├── diagrams/           # Mermaid diagrams for current/proposed flow
+    │   ├── current-data-flow.md
+    │   ├── proposed-data-flow.md
+    │   └── task-dependency-graph.md
     ├── tasks/              # Individual task files
     │   ├── task-001.json
     │   ├── task-002.json
@@ -277,6 +321,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
   "phase": "planning",
   "complexity": "complex",
   "original_request": "Build a REST API for user management",
+  "developer_acknowledged": true,
   "base_commit": "abc1234",
   "task_order": ["task-001", "task-002", "task-003"],
   "task_statuses": {
@@ -299,6 +344,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | `phase` | string | Current workflow phase (see Phase Values) |
 | `complexity` | string | Task complexity classification (`simple` or `complex`) |
 | `original_request` | string | The user's original task description |
+| `developer_acknowledged` | boolean | Whether the developer completed the walkthrough acknowledgement gate |
 | `base_commit` | string\|null | Git commit hash at start of execution |
 | `task_order` | array | Ordered list of task IDs for execution (dependencies, then priority) |
 | `task_statuses` | object | Map of task ID to status (see Task Status Values) |
@@ -313,8 +359,9 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | `code_context` | Analyzing local code paths, function interactions, and data flow |
 | `research` | Gathering technical specs, best practices via web search |
 | `decisions` | Surfacing and resolving critical decisions with user |
+| `awaiting_developer_ack` | Presenting layman walkthrough, diagrams, assumptions, and waiting for explicit acknowledgement |
 | `planning` | Generating PRD and discrete task files |
-| `planning_complete` | Plan ready for user review (run /ralph-start after /clear) |
+| `planning_complete` | Plan ready for execution because the developer acknowledged the walkthrough |
 | `executing` | Tasks are being executed via subagents |
 | `completed` | All tasks finished successfully |
 | `failed` | Execution stopped due to a task failure |
@@ -364,6 +411,7 @@ When `/ralph` is invoked, create the state file if it doesn't exist:
   "phase": "complexity_assessment",
   "complexity": null,
   "original_request": "<user's task description>",
+  "developer_acknowledged": false,
   "base_commit": null,
   "task_order": [],
   "task_statuses": {},
@@ -385,9 +433,11 @@ When `/ralph` is invoked, create the state file if it doesn't exist:
     ↓
 [decisions] → (surface critical decisions, wait for user input)
     ↓
+[awaiting_developer_ack] → (walk through current flow, proposed flow, diagrams, risks, and get ack)
+    ↓
 [planning] → (generate PRD and task files)
     ↓
-[planning_complete] → (user reviews, runs /clear, then /ralph-start)
+[planning_complete] → (acknowledged plan ready; user runs /clear, then /ralph-start)
     ↓
 /ralph-start invoked
     ↓
@@ -411,6 +461,7 @@ The agent should read the current state, modify the necessary fields, and write 
 - Always update `updated_at` when modifying state
 - The `task_order` array determines execution sequence
 - Tasks execute sequentially based on dependencies and priority (handled by /ralph-start)
+- `/ralph-start` must not execute unless `.ralph/acknowledgement.json` exists and `developer_acknowledged` is true
 - On failure, execution halts immediately and `phase` becomes `failed`
 
 ---
@@ -536,6 +587,8 @@ Code context analysis phase (trace affected code and data flow)
     ↓
 Skip decisions phase (or minimal)
     ↓
+Developer walkthrough gate (brief current/proposed flow, require ack)
+    ↓
 Generate lightweight plan
     ↓
 [planning_complete]
@@ -553,6 +606,8 @@ Code context analysis phase (trace existing auth/session flows)
 Research phase (specs, best practices, pitfalls)
     ↓
 Decisions phase (which OAuth provider? session vs JWT?)
+    ↓
+Developer walkthrough gate (brief, diagrams, risks, require ack)
     ↓
 Comprehensive planning with detailed tasks
     ↓
@@ -1169,7 +1224,7 @@ When implementing the `/ralph` command decision phase:
 5. Verify critical_resolved == true
 
 6. Update state.json:
-   - phase: "planning"
+   - phase: "awaiting_developer_ack"
    - updated_at: <current timestamp>
 ```
 
@@ -1188,8 +1243,8 @@ For simple tasks or tasks where research/code-context surfaced no ambiguities:
 }
 ```
 
-2. Inform user: "No decisions needed. Proceeding to planning..."
-3. Transition directly to planning phase
+2. Inform user: "No decisions needed. Proceeding to the developer walkthrough..."
+3. Transition to the developer walkthrough gate
 
 ### Notes
 
@@ -1198,20 +1253,169 @@ For simple tasks or tasks where research/code-context surfaced no ambiguities:
 - Critical decisions cannot be skipped - user must choose
 - Decisions are cached; re-running /ralph preserves previous decisions
 - User can re-run /ralph with `--reset-decisions` to clear and re-decide
-- The planning phase uses decisions.json and code_context.json to inform task generation
+- The developer walkthrough and planning phases use decisions.json and code_context.json to inform task generation
+
+---
+
+## Developer Walkthrough Gate
+
+Before final planning, Ralph must force a short understanding checkpoint. This is not optional for non-trivial work.
+
+### Purpose
+
+The developer should understand the slice of the system that Ralph is about to change without needing to read every generated file. The walkthrough should be short, plain, and concrete.
+
+### Required Artifacts
+
+Create these files:
+
+| Output | Location | Purpose |
+|--------|----------|---------|
+| Developer brief | `.ralph/brief.md` | Plain-English explanation of today's behavior, planned change, terms, risks, and review notes |
+| Current data flow | `.ralph/diagrams/current-data-flow.md` | Mermaid diagram showing how data moves today |
+| Proposed data flow | `.ralph/diagrams/proposed-data-flow.md` | Mermaid diagram showing how data will move after the change |
+| Task dependency graph | `.ralph/diagrams/task-dependency-graph.md` | Mermaid or ASCII graph showing execution order |
+| Acknowledgement | `.ralph/acknowledgement.json` | Proof that the developer acknowledged the walkthrough |
+
+For trivial one-file changes, diagrams may be simple, but still include a short current/proposed flow in `.ralph/brief.md`.
+
+### brief.md Structure
+
+```markdown
+# Ralph Developer Brief
+
+## What You Asked For
+[Original request in the user's words]
+
+## Terms You Need
+- [Term]: [Layman definition]
+
+## How It Works Today
+[Plain-English explanation of the current code path]
+
+## Current Data Flow
+[Embed or link to .ralph/diagrams/current-data-flow.md]
+
+## What Ralph Plans To Change
+[Plain-English explanation of the proposed change]
+
+## Proposed Data Flow
+[Embed or link to .ralph/diagrams/proposed-data-flow.md]
+
+## Files That Matter
+- `[path]`: [why this file matters in layman terms]
+
+## Assumptions
+- [What Ralph believes and why]
+
+## Risks
+- [What could go wrong or what needs careful review]
+
+## How To Review The Work Later
+- [Specific review instruction]
+```
+
+### Diagram Rules
+
+- Prefer Mermaid `flowchart TD` for data flow.
+- Label nodes with plain-language names first, then file/function names when useful.
+- Show input, validation, transformation, persistence, side effects, and output when those concepts exist.
+- Do not make diagrams decorative. Each node should teach how the change works.
+
+Example:
+
+```mermaid
+flowchart TD
+  A[User sends message] --> B[Controller receives request]
+  B --> C[Validate message fields]
+  C --> D[Save message in database]
+  D --> E[Broadcast message to chat subscribers]
+  E --> F[User sees message in chat]
+```
+
+### Chat Walkthrough Format
+
+Present this before asking for acknowledgement:
+
+```markdown
+Before I finalize the plan, here is the system slice in plain terms.
+
+What exists today:
+[Short layman explanation]
+
+Data flow:
+[Short explanation plus diagram path]
+
+What will change:
+[Short layman explanation]
+
+Files that matter:
+- `[path]`: [why]
+
+Risks / assumptions:
+- [risk or assumption]
+
+Reply `ack` if this makes sense, or ask questions / request changes.
+```
+
+### Acknowledgement Handling
+
+If the developer asks a question:
+1. Answer in layman terms.
+2. Update `.ralph/brief.md` if the answer changes or clarifies the plan.
+3. Update diagrams if the question exposes a missing or confusing flow.
+4. Ask for acknowledgement again.
+
+If the developer requests a plan change:
+1. Update the relevant decisions or brief.
+2. Re-present the changed section.
+3. Ask for acknowledgement again.
+
+When the developer explicitly acknowledges understanding, write `.ralph/acknowledgement.json`:
+
+```json
+{
+  "acknowledged_at": "2026-01-27T12:45:00Z",
+  "acknowledged_by_user": true,
+  "acknowledged_topics": [
+    "current_behavior",
+    "current_data_flow",
+    "planned_change",
+    "proposed_data_flow",
+    "files_that_matter",
+    "assumptions_and_risks"
+  ],
+  "questions_answered": [
+    {
+      "question": "...",
+      "answer": "..."
+    }
+  ]
+}
+```
+
+Then update `state.json`:
+
+```json
+{
+  "phase": "planning",
+  "developer_acknowledged": true,
+  "updated_at": "<current ISO 8601 timestamp>"
+}
+```
 
 ---
 
 ## Planning Phase
 
-After decisions are resolved, Ralph generates a comprehensive plan with discrete, executable tasks. This phase produces a PRD document and individual task files that enable autonomous execution via subagents.
+After decisions are resolved and the developer has acknowledged the walkthrough, Ralph generates a comprehensive plan with discrete, executable tasks. This phase produces a PRD document and individual task files that enable autonomous execution via subagents.
 
 ### When Planning Runs
 
-Planning runs after all critical decisions are resolved:
+Planning runs after all critical decisions are resolved and `.ralph/acknowledgement.json` confirms developer understanding:
 
 ```
-Decisions phase complete (critical_resolved: true)
+Developer walkthrough acknowledged
     ↓
 [planning] phase begins
     ↓
@@ -1233,6 +1437,8 @@ User reviews plan, runs /clear, then /ralph-start
 | PRD Document | `.ralph/prd.md` | Human-readable plan overview |
 | Task Files | `.ralph/tasks/task-NNN.json` | Machine-readable task specifications |
 | State Update | `.ralph/state.json` | task_order, task_statuses populated |
+
+Planning must preserve the developer-facing explanation from `.ralph/brief.md`; do not replace it with implementation-heavy language.
 
 ### PRD Document Generation
 
@@ -1277,6 +1483,9 @@ The PRD (Product Requirements Document) provides a human-readable overview of th
 ## Acceptance Criteria
 [Overall success criteria for the complete implementation]
 
+## Developer Walkthrough
+[Link to .ralph/brief.md and diagrams]
+
 ## Notes
 [Any additional context or considerations]
 ```
@@ -1287,13 +1496,14 @@ When generating the PRD:
 
 1. **Title**: Derive from original request, make it descriptive
 2. **Overview**: 2-3 sentences summarizing the implementation approach
-3. **Code Context Summary**: Extract key call paths, data flows, and reuse candidates from code_context.json
+3. **Code Context Summary**: Extract key call paths, data flows, and reuse candidates from code_context.json in layman terms
 4. **Research Summary**: Extract key insights from research.json (skip if simple task)
 5. **Decisions Made**: List each decision from decisions.json with selected option
-6. **Implementation Plan**: Group related tasks into logical phases
-7. **Dependency Graph**: ASCII diagram showing task dependencies
-8. **Files to Modify**: Aggregate from all task files_to_modify lists
-9. **Acceptance Criteria**: High-level criteria derived from user's request
+6. **Developer Walkthrough**: Link to `.ralph/brief.md` and `.ralph/diagrams/`
+7. **Implementation Plan**: Group related tasks into logical phases
+8. **Dependency Graph**: ASCII or Mermaid diagram showing task dependencies
+9. **Files to Modify**: Aggregate from all task files_to_modify lists
+10. **Acceptance Criteria**: High-level criteria derived from user's request
 
 ### Task File Structure
 
@@ -1306,10 +1516,17 @@ Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files a
   "id": "task-001",
   "title": "Create user model and migration",
   "description": "Define the User schema with fields for authentication and create the corresponding database migration.",
+  "why_this_task_exists": "The app needs a safe place to store user account records before login can work.",
+  "plain_english_summary": "Create the database shape and code object for users.",
+  "expected_user_visible_change": "No direct UI change yet; this prepares the backend for account features.",
   "acceptance_criteria": [
     "User model exists with email, password_hash, and timestamps",
     "Migration file creates users table with correct columns",
     "Migration runs successfully without errors"
+  ],
+  "verification_plan": [
+    "Run the migration check or relevant test command",
+    "Confirm the user schema has the required fields"
   ],
   "dependencies": [],
   "priority": 2,
@@ -1338,7 +1555,11 @@ Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files a
 | `id` | string | Yes | Unique identifier (task-001, task-002, etc.) |
 | `title` | string | Yes | Brief, descriptive title (5-10 words) |
 | `description` | string | Yes | Detailed description of what to implement |
+| `why_this_task_exists` | string | Yes | Layman explanation of why this task is needed |
+| `plain_english_summary` | string | Yes | Developer-facing summary of the task without jargon |
+| `expected_user_visible_change` | string | Yes | What a user/developer should notice after this task, or "No direct visible change" |
 | `acceptance_criteria` | array | Yes | List of specific, verifiable criteria |
+| `verification_plan` | array | Yes | Checks/tests the subagent should run or explain if unavailable |
 | `dependencies` | array | Yes | List of task IDs that must complete first |
 | `priority` | number | Yes | Execution priority (1 = highest, 5 = lowest) |
 | `reuse_notes` | array | No | Pointers to existing helpers/utilities to reuse |
@@ -1506,7 +1727,7 @@ rg -n "client|api|http" src lib
 When implementing the `/ralph` command planning phase:
 
 1. **Update state**: Set phase to `planning`
-2. **Load inputs**: Read code_context.json, research.json (if exists), and decisions.json
+2. **Load inputs**: Read code_context.json, research.json (if exists), decisions.json, brief.md, diagrams, and acknowledgement.json
 3. **Analyze scope**: Determine tasks needed based on request, code context, and decisions
 4. **Reuse sweep**: Search the codebase for existing helpers/utilities and capture findings
 5. **Generate tasks**: Create task files following the schema
@@ -1519,7 +1740,7 @@ When implementing the `/ralph` command planning phase:
 **Example flow:**
 
 ```
-# After decisions phase complete...
+# After developer walkthrough is acknowledged...
 
 1. Update state.json:
    - phase: "planning"
@@ -1529,6 +1750,9 @@ When implementing the `/ralph` command planning phase:
    - Read .ralph/code_context.json
    - Read .ralph/research.json (if exists)
    - Read .ralph/decisions.json
+   - Read .ralph/brief.md
+   - Read .ralph/acknowledgement.json
+   - Read .ralph/diagrams/
 
 3. Break down the task:
    - Identify all work items needed
@@ -1542,7 +1766,9 @@ When implementing the `/ralph` command planning phase:
 5. For each task:
    - Generate task-NNN.json
    - Assign id, title, description
+   - Add why_this_task_exists, plain_english_summary, expected_user_visible_change
    - Define acceptance_criteria
+   - Define verification_plan
    - Set dependencies
    - Calculate priority
    - Identify existing helpers/utilities to reuse and add reuse_notes
@@ -1552,6 +1778,7 @@ When implementing the `/ralph` command planning phase:
    - Compile overview from original request
    - Summarize code context findings (call paths and data flow)
    - Summarize research and decisions
+   - Link the developer brief and diagrams
    - Document implementation phases
    - Create dependency graph visualization
    - List all files to modify
@@ -1565,7 +1792,9 @@ When implementing the `/ralph` command planning phase:
    - updated_at: <current timestamp>
 
 8. Inform user:
-   - "Planning complete! Review the plan at .ralph/prd.md"
+   - "Planning complete! Developer walkthrough: .ralph/brief.md"
+   - "Diagrams: .ralph/diagrams/"
+   - "Plan: .ralph/prd.md"
    - "When ready, run /clear to reset context, then /ralph-start to execute"
 ```
 
@@ -1579,6 +1808,8 @@ Before finalizing, validate all task files:
 4. **Complete coverage**: All work items are accounted for
 5. **Valid priority**: Each task has priority 1-5
 6. **Proper sizing**: No task is too large for single session
+7. **Developer fields**: Each task includes layman-facing why_this_task_exists, plain_english_summary, expected_user_visible_change, and verification_plan
+8. **Acknowledgement present**: `.ralph/acknowledgement.json` exists and confirms `acknowledged_by_user: true`
 
 ### Notes
 
