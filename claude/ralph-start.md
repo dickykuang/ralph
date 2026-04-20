@@ -12,7 +12,7 @@ Before executing, verify the following:
 4. **Verify clean working tree**: `git status --porcelain` must be empty
 5. **Verify plan artifacts**: `.ralph/prd.md`, `.ralph/decisions.json`, and `.ralph/code_context.json` should exist
 6. **Verify developer walkthrough artifacts**: `.ralph/brief.md`, `.ralph/acknowledgement.json`, and `.ralph/diagrams/` should exist
-7. **Verify developer acknowledgement**: `.ralph/acknowledgement.json` must contain `acknowledged_by_user: true`; `state.json` should contain `developer_acknowledged: true`
+7. **Verify developer acknowledgement**: `.ralph/acknowledgement.json` must contain `acknowledged_by_user: true` and `business_logic_confirmed: true`; `state.json` should contain `developer_acknowledged: true` and `business_logic_confirmed: true`
 8. **Read task files**: Load all tasks from `.ralph/tasks/`
 9. **Verify tasks exist**: At least one task file must be present
 10. **Reuse notes check**: Warn if a task appears to need reuse but has no `reuse_notes`
@@ -24,7 +24,7 @@ If acknowledgement is missing, stop with:
 Execution blocked.
 
 The developer has not acknowledged the Ralph planning walkthrough yet.
-Run /ralph again, review the plain-English walkthrough and diagrams, then reply `ack`.
+Run /ralph again, review the plain-English walkthrough, business logic understanding, and diagrams, then reply `ack`.
 ```
 
 ---
@@ -129,7 +129,7 @@ Task tool parameters:
     project requirements, architecture decisions, and how this task fits into
     the overall plan.
 
-    Also read `.ralph/brief.md` and `.ralph/diagrams/`. These are the developer-facing explanation of the system slice. Preserve the explained data flow unless this task explicitly changes it.
+    Also read `.ralph/brief.md` and `.ralph/diagrams/`. These are the developer-facing explanation of the system slice, including the confirmed and inferred business logic. Preserve the explained data flow and business rules unless this task explicitly changes them.
 
     ---
 
@@ -148,6 +148,9 @@ Task tool parameters:
     EXPECTED USER-VISIBLE CHANGE:
     [task.expected_user_visible_change]
 
+    BUSINESS LOGIC CONTEXT:
+    [task.business_logic_context, including rules_to_preserve, rules_this_task_changes, inferred_rules_to_verify, unresolved_business_questions, and examples. If missing, extract the relevant Business Logic Understanding section from .ralph/brief.md and .ralph/prd.md.]
+
     ACCEPTANCE CRITERIA:
     [Each criterion as a bullet point]
 
@@ -165,7 +168,7 @@ Task tool parameters:
 
     CODE CONTEXT NOTES:
     [If task.context.code_context_refs exists, include the referenced items from .ralph/code_context.json.
-    Otherwise include the most relevant entry_points, hot_paths, and data_flows from .ralph/code_context.json for this task.]
+    Otherwise include the most relevant entry_points, hot_paths, data_flows, and business_logic from .ralph/code_context.json for this task.]
 
     RESEARCH NOTES:
     [If task.context.research_refs exists, include the referenced items from .ralph/research.json]
@@ -188,14 +191,14 @@ Task tool parameters:
     ---
 
     Instructions:
-    1. Read `.ralph/prd.md`, `.ralph/brief.md`, and `.ralph/diagrams/` to understand the overall project context
+    1. Read `.ralph/prd.md`, `.ralph/brief.md`, and `.ralph/diagrams/` to understand the overall project context and business logic
     2. Implement the task following the description
     3. Ensure ALL acceptance criteria are met
     4. Only modify the files listed (or closely related files if necessary)
     5. Run relevant tests if applicable
     6. Do NOT run `git add` or `git commit` (the orchestrator handles commits)
     7. Prefer existing helpers/utilities. Before creating a new function, search the codebase for an existing one. Only add a new function if no suitable helper exists, and keep it centralized (avoid duplicates).
-    8. Preserve documented data-flow invariants from CODE CONTEXT NOTES unless the task explicitly requires changing them.
+    8. Preserve documented data-flow and business-rule invariants from CODE CONTEXT NOTES and BUSINESS LOGIC CONTEXT unless the task explicitly requires changing them.
 
     OUTPUT REQUIREMENTS - CRITICAL:
     - Explain results in plain, layman terms for the developer
@@ -211,7 +214,8 @@ Task tool parameters:
     4. How it works (short layman explanation)
     5. List of files modified with plain-language purpose
     6. Verification performed
-    7. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
+    7. Business rules preserved or changed
+    8. For each acceptance criterion: ✓ Met or ✗ Not met (with brief reason if not met)
 ```
 
 ### Prompt Assembly Notes
@@ -223,7 +227,7 @@ Task tool parameters:
 - **Reuse Notes**: If `task.reuse_notes` exists, include it as a bullet list.
 - **Developer Brief**: Include the relevant `.ralph/brief.md` sections for this task, especially current behavior, proposed behavior, terms, risks, and files that matter.
 - **Diagram Notes**: Include relevant Mermaid diagram snippets or node summaries from `.ralph/diagrams/`.
-- **Developer Task Fields**: Include `why_this_task_exists`, `plain_english_summary`, `expected_user_visible_change`, and `verification_plan`. If an older task file does not have these fields, synthesize short layman-language replacements before prompting the subagent.
+- **Developer Task Fields**: Include `why_this_task_exists`, `plain_english_summary`, `expected_user_visible_change`, `business_logic_context`, and `verification_plan`. If an older task file does not have these fields, synthesize short layman-language replacements before prompting the subagent. If `business_logic_context` is missing, extract the relevant rules from `.ralph/brief.md`, `.ralph/prd.md`, and `.ralph/code_context.json`.
 - **Fallbacks**: If any of the above data is missing, write "None" for that section.
 
 ---

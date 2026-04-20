@@ -9,8 +9,9 @@ Ralph plans for a developer who may not know the whole system. Developer-facing 
 - Explain the current behavior before explaining the proposed change.
 - Define project-specific terms before relying on them.
 - Show how data moves through the system with diagrams for any non-trivial change.
+- Make business logic explicit: separate confirmed rules, inferred rules, proposed rule changes, unresolved business questions, examples, source, and confidence.
 - Present the essential walkthrough in chat and save it to `.ralph/brief.md`.
-- Force developer understanding with an acknowledgement gate before execution can start.
+- Force developer understanding with an acknowledgement gate before execution can start, including explicit acknowledgement or correction of the business logic understanding.
 
 ## Arguments
 
@@ -46,8 +47,9 @@ Run this phase for both simple and complex tasks:
 
 1. **Update state.json**: Set `phase` to "code_context"
 2. **Analyze local codebase**: Identify relevant entry points, modules, call paths, and boundaries
-3. **Trace data flow**: Document what data is passed through key functions, where it is validated/transformed, and where it is persisted/emitted
-4. **Save results** to `.ralph/code_context.json`
+3. **Extract business logic**: Identify product/business rules expressed by code, tests, docs, or the user's request; label inferred rules clearly
+4. **Trace data flow**: Document what data is passed through key functions, where it is validated/transformed, and where it is persisted/emitted
+5. **Save results** to `.ralph/code_context.json`
 
 ### Phase 3: Research (Complex Tasks Only)
 
@@ -81,13 +83,14 @@ Only run this phase if complexity is "complex":
 3. **Present a layman-language walkthrough in chat**:
    - What exists today
    - How data currently moves through the system
+   - What business rules Ralph believes are confirmed, inferred, changed, or still unresolved
    - What Ralph plans to change
    - What files matter and why
    - Assumptions, risks, and terms the developer needs
 4. **Ask for acknowledgement**:
    - The developer may answer `ack`, ask questions, request diagram changes, or request plan changes
-   - Answer questions in layman terms and update `.ralph/brief.md` or diagrams when needed
-   - Do not proceed until the developer explicitly acknowledges understanding
+   - Answer questions in layman terms and update `.ralph/brief.md`, the business logic section, or diagrams when needed
+   - Do not proceed until the developer explicitly acknowledges understanding and either confirms or corrects the business logic understanding
 5. **Save acknowledgement** to `.ralph/acknowledgement.json`
 
 ### Phase 6: Planning
@@ -97,7 +100,7 @@ Only run this phase if complexity is "complex":
 3. **Generate PRD document** following "Planning Phase" section structure
 4. **Create task files** in `.ralph/tasks/` directory:
    - Each task has: id, title, description, acceptance_criteria, dependencies, priority, files_to_modify
-   - Each task also has: why_this_task_exists, plain_english_summary, expected_user_visible_change, verification_plan
+   - Each task also has: why_this_task_exists, plain_english_summary, expected_user_visible_change, business_logic_context, verification_plan
    - Tasks sized for single-session completion
    - Priorities assigned based on risk, dependencies, and sequencing needs
 5. **Update state.json**:
@@ -322,6 +325,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
   "complexity": "complex",
   "original_request": "Build a REST API for user management",
   "developer_acknowledged": true,
+  "business_logic_confirmed": true,
   "base_commit": "abc1234",
   "task_order": ["task-001", "task-002", "task-003"],
   "task_statuses": {
@@ -345,6 +349,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | `complexity` | string | Task complexity classification (`simple` or `complex`) |
 | `original_request` | string | The user's original task description |
 | `developer_acknowledged` | boolean | Whether the developer completed the walkthrough acknowledgement gate |
+| `business_logic_confirmed` | boolean | Whether the developer confirmed or corrected Ralph's business logic understanding |
 | `base_commit` | string\|null | Git commit hash at start of execution |
 | `task_order` | array | Ordered list of task IDs for execution (dependencies, then priority) |
 | `task_statuses` | object | Map of task ID to status (see Task Status Values) |
@@ -359,7 +364,7 @@ Ralph maintains persistent state in `.ralph/state.json` to track progress across
 | `code_context` | Analyzing local code paths, function interactions, and data flow |
 | `research` | Gathering technical specs, best practices via web search |
 | `decisions` | Surfacing and resolving critical decisions with user |
-| `awaiting_developer_ack` | Presenting layman walkthrough, diagrams, assumptions, and waiting for explicit acknowledgement |
+| `awaiting_developer_ack` | Presenting layman walkthrough, business logic understanding, diagrams, assumptions, and waiting for explicit acknowledgement |
 | `planning` | Generating PRD and discrete task files |
 | `planning_complete` | Plan ready for execution because the developer acknowledged the walkthrough |
 | `executing` | Tasks are being executed via subagents |
@@ -412,6 +417,7 @@ When `/ralph` is invoked, create the state file if it doesn't exist:
   "complexity": null,
   "original_request": "<user's task description>",
   "developer_acknowledged": false,
+  "business_logic_confirmed": false,
   "base_commit": null,
   "task_order": [],
   "task_statuses": {},
@@ -433,7 +439,7 @@ When `/ralph` is invoked, create the state file if it doesn't exist:
     ↓
 [decisions] → (surface critical decisions, wait for user input)
     ↓
-[awaiting_developer_ack] → (walk through current flow, proposed flow, diagrams, risks, and get ack)
+[awaiting_developer_ack] → (walk through current flow, business logic, proposed flow, diagrams, risks, and get ack)
     ↓
 [planning] → (generate PRD and task files)
     ↓
@@ -663,8 +669,10 @@ This phase should answer:
 1. Which files/modules are on the request's execution path
 2. Which functions call which functions for the affected behavior
 3. What input/output data moves through those functions
-4. Where data is validated, transformed, and persisted or emitted
-5. Which existing helpers/utilities should be reused
+4. What business rules are enforced by the affected code, tests, docs, or user request
+5. Which business rules are inferred rather than confirmed
+6. Where data is validated, transformed, and persisted or emitted
+7. Which existing helpers/utilities should be reused
 
 ### Output Format: code_context.json
 
@@ -695,6 +703,36 @@ Save findings to `.ralph/code_context.json`:
       "sink": "users.email column"
     }
   ],
+  "business_logic": {
+    "confirmed_rules": [
+      {
+        "rule": "Signup email is normalized before persistence.",
+        "source": "src/routes/signup.ts and existing signup tests",
+        "confidence": "high",
+        "examples": ["Alice@Example.com is stored as alice@example.com"]
+      }
+    ],
+    "inferred_rules": [
+      {
+        "rule": "The product treats email uniqueness as case-insensitive.",
+        "source": "lowercase transform before insert",
+        "confidence": "medium",
+        "needs_confirmation": true,
+        "examples": ["Alice@Example.com and alice@example.com should collide"]
+      }
+    ],
+    "proposed_rule_changes": [
+      {
+        "rule": "Invalid email addresses should be rejected before user creation.",
+        "source": "user request",
+        "confidence": "high",
+        "examples": ["not-an-email returns a validation error"]
+      }
+    ],
+    "unresolved_questions": [
+      "Should disposable email domains be blocked or only syntactically invalid emails?"
+    ]
+  },
   "reuse_candidates": [
     "src/lib/validators/email.ts#validateEmail",
     "src/lib/normalizers/string.ts#normalizeEmail"
@@ -712,10 +750,11 @@ When implementing the `/ralph` command, run code context analysis as follows:
 1. **Update state**: Set phase to `code_context`
 2. **Identify scope**: Determine likely entry points and modules from the request
 3. **Trace logic**: Follow key call chains for impacted behavior
-4. **Trace data**: Record important values through function boundaries (source -> validation/transforms -> sink)
-5. **Capture reuse**: Identify existing helpers/utilities to reuse
-6. **Save output**: Write `.ralph/code_context.json`
-7. **Branch next phase**:
+4. **Extract business logic**: Record confirmed rules, inferred rules, proposed rule changes, unresolved questions, examples, source, and confidence
+5. **Trace data**: Record important values through function boundaries (source -> validation/transforms -> sink)
+6. **Capture reuse**: Identify existing helpers/utilities to reuse
+7. **Save output**: Write `.ralph/code_context.json`
+8. **Branch next phase**:
    - `complex` -> `research`
    - `simple` -> `decisions`
 
@@ -1271,7 +1310,7 @@ Create these files:
 
 | Output | Location | Purpose |
 |--------|----------|---------|
-| Developer brief | `.ralph/brief.md` | Plain-English explanation of today's behavior, planned change, terms, risks, and review notes |
+| Developer brief | `.ralph/brief.md` | Plain-English explanation of today's behavior, business logic understanding, planned change, terms, risks, and review notes |
 | Current data flow | `.ralph/diagrams/current-data-flow.md` | Mermaid diagram showing how data moves today |
 | Proposed data flow | `.ralph/diagrams/proposed-data-flow.md` | Mermaid diagram showing how data will move after the change |
 | Task dependency graph | `.ralph/diagrams/task-dependency-graph.md` | Mermaid or ASCII graph showing execution order |
@@ -1298,6 +1337,30 @@ For trivial one-file changes, diagrams may be simple, but still include a short 
 
 ## What Ralph Plans To Change
 [Plain-English explanation of the proposed change]
+
+## Business Logic Understanding
+
+### Confirmed Rules
+- Rule: [Business/product rule Ralph believes is confirmed]
+  Source: [Code, test, docs, or user request]
+  Confidence: [high|medium|low]
+  Example: [Concrete input/output or scenario]
+
+### Inferred Rules
+- Rule: [Business/product rule Ralph is inferring, not treating as fact]
+  Source: [Why Ralph inferred it]
+  Confidence: [high|medium|low]
+  Needs confirmation: [yes|no]
+  Example: [Concrete input/output or scenario]
+
+### Proposed Rule Changes
+- Rule: [Business/product rule that will change if this plan is implemented]
+  Source: [User request or decision]
+  Confidence: [high|medium|low]
+  Example: [Concrete before/after scenario]
+
+### Unresolved Business Questions
+- [Question that must be answered before implementation can safely assume the rule]
 
 ## Proposed Data Flow
 [Embed or link to .ralph/diagrams/proposed-data-flow.md]
@@ -1349,13 +1412,19 @@ Data flow:
 What will change:
 [Short layman explanation]
 
+Business logic understanding:
+- Confirmed: [rules with source/confidence]
+- Inferred: [rules with source/confidence and "needs confirmation" where applicable]
+- Changing: [planned business rule changes]
+- Questions: [unresolved business questions]
+
 Files that matter:
 - `[path]`: [why]
 
 Risks / assumptions:
 - [risk or assumption]
 
-Reply `ack` if this makes sense, or ask questions / request changes.
+Reply `ack` if the technical walkthrough and business logic understanding make sense, or ask questions / request changes.
 ```
 
 ### Acknowledgement Handling
@@ -1363,13 +1432,20 @@ Reply `ack` if this makes sense, or ask questions / request changes.
 If the developer asks a question:
 1. Answer in layman terms.
 2. Update `.ralph/brief.md` if the answer changes or clarifies the plan.
-3. Update diagrams if the question exposes a missing or confusing flow.
-4. Ask for acknowledgement again.
+3. Update the Business Logic Understanding section if the question confirms, rejects, or clarifies a business rule.
+4. Update diagrams if the question exposes a missing or confusing flow.
+5. Ask for acknowledgement again.
 
 If the developer requests a plan change:
 1. Update the relevant decisions or brief.
 2. Re-present the changed section.
 3. Ask for acknowledgement again.
+
+If the developer corrects a business rule:
+1. Move the corrected rule into the right subsection: Confirmed Rules, Inferred Rules, Proposed Rule Changes, or Unresolved Business Questions.
+2. Record the correction in plain terms with source "developer correction".
+3. Re-check whether any decisions or tasks need to change before planning.
+4. Ask for acknowledgement again.
 
 When the developer explicitly acknowledges understanding, write `.ralph/acknowledgement.json`:
 
@@ -1382,8 +1458,17 @@ When the developer explicitly acknowledges understanding, write `.ralph/acknowle
     "current_data_flow",
     "planned_change",
     "proposed_data_flow",
+    "business_logic_understanding",
     "files_that_matter",
     "assumptions_and_risks"
+  ],
+  "business_logic_confirmed": true,
+  "business_logic_corrections": [
+    {
+      "original_rule": "...",
+      "corrected_rule": "...",
+      "source": "developer correction"
+    }
   ],
   "questions_answered": [
     {
@@ -1400,6 +1485,7 @@ Then update `state.json`:
 {
   "phase": "planning",
   "developer_acknowledged": true,
+  "business_logic_confirmed": true,
   "updated_at": "<current ISO 8601 timestamp>"
 }
 ```
@@ -1458,6 +1544,9 @@ The PRD (Product Requirements Document) provides a human-readable overview of th
 ## Code Context Summary
 [Key local code paths and data-flow findings from code_context.json]
 
+## Business Logic Understanding
+[Confirmed rules, inferred rules, proposed rule changes, unresolved questions, examples, source, and confidence from brief.md and code_context.json]
+
 ## Research Summary
 [Key findings from research phase, if applicable]
 
@@ -1497,13 +1586,14 @@ When generating the PRD:
 1. **Title**: Derive from original request, make it descriptive
 2. **Overview**: 2-3 sentences summarizing the implementation approach
 3. **Code Context Summary**: Extract key call paths, data flows, and reuse candidates from code_context.json in layman terms
-4. **Research Summary**: Extract key insights from research.json (skip if simple task)
-5. **Decisions Made**: List each decision from decisions.json with selected option
-6. **Developer Walkthrough**: Link to `.ralph/brief.md` and `.ralph/diagrams/`
-7. **Implementation Plan**: Group related tasks into logical phases
-8. **Dependency Graph**: ASCII or Mermaid diagram showing task dependencies
-9. **Files to Modify**: Aggregate from all task files_to_modify lists
-10. **Acceptance Criteria**: High-level criteria derived from user's request
+4. **Business Logic Understanding**: Copy the confirmed rules, inferred rules, proposed rule changes, unresolved questions, examples, source, and confidence from `.ralph/brief.md` and `.ralph/code_context.json`
+5. **Research Summary**: Extract key insights from research.json (skip if simple task)
+6. **Decisions Made**: List each decision from decisions.json with selected option
+7. **Developer Walkthrough**: Link to `.ralph/brief.md` and `.ralph/diagrams/`
+8. **Implementation Plan**: Group related tasks into logical phases
+9. **Dependency Graph**: ASCII or Mermaid diagram showing task dependencies
+10. **Files to Modify**: Aggregate from all task files_to_modify lists
+11. **Acceptance Criteria**: High-level criteria derived from user's request
 
 ### Task File Structure
 
@@ -1519,6 +1609,21 @@ Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files a
   "why_this_task_exists": "The app needs a safe place to store user account records before login can work.",
   "plain_english_summary": "Create the database shape and code object for users.",
   "expected_user_visible_change": "No direct UI change yet; this prepares the backend for account features.",
+  "business_logic_context": {
+    "rules_to_preserve": [
+      "Only one account may exist per normalized email address."
+    ],
+    "rules_this_task_changes": [
+      "User records can now exist as first-class account records."
+    ],
+    "inferred_rules_to_verify": [
+      "Email uniqueness appears case-insensitive because emails are normalized before storage."
+    ],
+    "unresolved_business_questions": [],
+    "examples": [
+      "Alice@Example.com and alice@example.com should not create two separate accounts."
+    ]
+  },
   "acceptance_criteria": [
     "User model exists with email, password_hash, and timestamps",
     "Migration file creates users table with correct columns",
@@ -1558,6 +1663,7 @@ Each task is saved as a separate JSON file in `.ralph/tasks/` directory. Files a
 | `why_this_task_exists` | string | Yes | Layman explanation of why this task is needed |
 | `plain_english_summary` | string | Yes | Developer-facing summary of the task without jargon |
 | `expected_user_visible_change` | string | Yes | What a user/developer should notice after this task, or "No direct visible change" |
+| `business_logic_context` | object | Yes | Business rules the worker must preserve or change, inferred rules to verify, unresolved questions, and concrete examples |
 | `acceptance_criteria` | array | Yes | List of specific, verifiable criteria |
 | `verification_plan` | array | Yes | Checks/tests the subagent should run or explain if unavailable |
 | `dependencies` | array | Yes | List of task IDs that must complete first |
@@ -1767,6 +1873,7 @@ When implementing the `/ralph` command planning phase:
    - Generate task-NNN.json
    - Assign id, title, description
    - Add why_this_task_exists, plain_english_summary, expected_user_visible_change
+   - Add business_logic_context with rules_to_preserve, rules_this_task_changes, inferred_rules_to_verify, unresolved_business_questions, and examples
    - Define acceptance_criteria
    - Define verification_plan
    - Set dependencies
@@ -1777,6 +1884,7 @@ When implementing the `/ralph` command planning phase:
 6. Generate PRD:
    - Compile overview from original request
    - Summarize code context findings (call paths and data flow)
+   - Include the Business Logic Understanding section with confirmed/inferred/changed/unresolved rules, source, confidence, and examples
    - Summarize research and decisions
    - Link the developer brief and diagrams
    - Document implementation phases
@@ -1808,8 +1916,9 @@ Before finalizing, validate all task files:
 4. **Complete coverage**: All work items are accounted for
 5. **Valid priority**: Each task has priority 1-5
 6. **Proper sizing**: No task is too large for single session
-7. **Developer fields**: Each task includes layman-facing why_this_task_exists, plain_english_summary, expected_user_visible_change, and verification_plan
-8. **Acknowledgement present**: `.ralph/acknowledgement.json` exists and confirms `acknowledged_by_user: true`
+7. **Developer fields**: Each task includes layman-facing why_this_task_exists, plain_english_summary, expected_user_visible_change, business_logic_context, and verification_plan
+8. **Business logic coverage**: Every business rule in the PRD is either preserved, changed, verified, or explicitly marked unresolved in at least one task
+9. **Acknowledgement present**: `.ralph/acknowledgement.json` exists and confirms `acknowledged_by_user: true` and `business_logic_confirmed: true`
 
 ### Notes
 
